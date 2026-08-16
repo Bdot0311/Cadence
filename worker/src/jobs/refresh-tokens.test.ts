@@ -144,10 +144,27 @@ describe('refresh token handling', () => {
     expect(h.saved[0]?.tokens.refreshToken).toBe('new-refresh');
   });
 
-  it('skips an account with no refresh token rather than throwing', async () => {
+  it('keeps a valid account connected when LinkedIn issued no refresh token', async () => {
+    const h = deps({ accounts: [account({ refreshToken: null, refreshExpiresAt: null })] });
+    const r = await runTokenRefresh({ now: T0, deps: h.deps });
+    expect(r[0]).toMatchObject({ action: 'skipped', reason: expect.stringMatching(/is connected/) });
+    expect(h.alerts).toEqual([]);
+    expect(h.logs).toEqual([]);
+  });
+
+  it('warns near expiry when LinkedIn issued no refresh token', async () => {
     const h = deps({ accounts: [account({ refreshToken: null, tokenExpiresAt: days(1) })] });
     const r = await runTokenRefresh({ now: T0, deps: h.deps });
     expect(r[0]).toMatchObject({ action: 'skipped' });
+    expect(h.alerts).toHaveLength(1);
+    expect(h.logs[0]?.decision).toBe('reauth-needed');
+  });
+
+  it('deactivates only after an unrefreshable access token expires', async () => {
+    const h = deps({ accounts: [account({ refreshToken: null, tokenExpiresAt: days(-1) })] });
+    const r = await runTokenRefresh({ now: T0, deps: h.deps });
+    expect(r[0]).toMatchObject({ action: 'reauth-required' });
+    expect(h.deactivations).toHaveLength(1);
   });
 });
 

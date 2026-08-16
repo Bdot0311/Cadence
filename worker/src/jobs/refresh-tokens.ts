@@ -60,6 +60,8 @@ export async function runTokenRefresh(args: {
   const results: RefreshOutcome[] = [];
 
   for (const account of await deps.accounts()) {
+    const daysLeft = daysUntil(account.tokenExpiresAt, now);
+
     // The un-automatable case, checked first. A refresh token that has already
     // lapsed cannot be used to obtain anything, so there is nothing to try.
     if (account.refreshExpiresAt && account.refreshExpiresAt <= now) {
@@ -85,15 +87,32 @@ export async function runTokenRefresh(args: {
     }
 
     if (!account.refreshToken) {
-      const reason = 'No refresh token stored. Reconnect the account.';
+      if (daysLeft > RENEW_WITHIN_DAYS) {
+        results.push({
+          accountId: account.id,
+          action: 'skipped',
+          reason: `LinkedIn is connected; access token is valid until ${account.tokenExpiresAt.toISOString()}.`,
+        });
+        continue;
+      }
+
+      const expired = daysLeft <= 0;
+      const reason = expired
+        ? `LinkedIn access expired on ${account.tokenExpiresAt.toISOString()}; re-authorization is required.`
+        : `LinkedIn did not issue this app a programmatic refresh token. Re-authorize before ${account.tokenExpiresAt.toISOString()}.`;
+      if (expired) await deps.deactivate(account.id, reason);
+      await deps.alert(
+        `LinkedIn agent: ${expired ? 're-authorization required' : 'authorization expires soon'} for ${account.displayName}`,
+        reason,
+      );
       await deps.log({
         accountId: account.id,
         stage: 'refresh',
-        level: 'warn',
-        decision: 'skipped',
+        level: expired ? 'error' : 'warn',
+        decision: expired ? 'deactivated' : 'reauth-needed',
         rationale: reason,
       });
-      results.push({ accountId: account.id, action: 'skipped', reason });
+      results.push({ accountId: account.id, action: expired ? 'reauth-required' : 'skipped', reason });
       continue;
     }
 
@@ -112,7 +131,6 @@ export async function runTokenRefresh(args: {
       );
     }
 
-    const daysLeft = daysUntil(account.tokenExpiresAt, now);
     if (daysLeft > RENEW_WITHIN_DAYS) {
       const reason = `Access token has ${Math.floor(daysLeft)} days left; renewing inside ${RENEW_WITHIN_DAYS}.`;
       results.push({ accountId: account.id, action: 'skipped', reason });
