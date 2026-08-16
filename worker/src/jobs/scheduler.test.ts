@@ -170,6 +170,17 @@ describe('pacing', () => {
     expect(h.create).toHaveBeenCalledOnce();
   });
 
+  it('honors Post now even when automatic cadence caps and spacing are full', async () => {
+    const h = deps({
+      async duePosts() { return [{ ...post('p1'), scheduledAt: NOW }]; },
+      async publishedPosts() { return [{ publishedAt: new Date(NOW.getTime() - 60_000) }]; },
+    });
+    const r = await runSchedulerTick({ now: NOW, deps: h.deps });
+
+    expect(r).toMatchObject({ published: 1, skipped: 0 });
+    expect(h.create).toHaveBeenCalledOnce();
+  });
+
   it('parks a jittered post for a later tick rather than sleeping', async () => {
     const h = deps({ random: () => 0.99 });
     const r = await runSchedulerTick({ now: NOW, deps: h.deps });

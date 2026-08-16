@@ -147,6 +147,7 @@ export async function runSchedulerTick(args: {
         published: alreadyPublished,
         cooldownUntil: account.cooldownUntil,
         ignoreWindow: post.scheduledAt !== null,
+        ignorePacing: post.scheduledAt !== null,
         ...(deps.random ? { random: deps.random } : {}),
       });
 

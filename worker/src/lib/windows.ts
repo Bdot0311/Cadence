@@ -131,8 +131,10 @@ export function findSlot(args: {
   now: Date;
   cfg: ScheduleConfig;
   published: PublishedPost[];
-  /** A human-selected time may bypass the cadence window, but never caps or spacing. */
+  /** A human-selected time may bypass the cadence window. */
   ignoreWindow?: boolean;
+  /** Explicit Post now / Schedule choices override automatic cadence pacing. */
+  ignorePacing?: boolean;
   /** Injectable for tests. */
   random?: () => number;
   /** Set when the account is cooling down after a badly underperforming post. */
@@ -152,27 +154,29 @@ export function findSlot(args: {
     return { ok: false, reason: 'Outside every configured publishing window.' };
   }
 
-  const today = countSameLocalDay(published, now, cfg.timezone);
-  if (today >= cfg.dailyCap) {
-    return { ok: false, reason: `Daily cap reached (${today}/${cfg.dailyCap}).` };
-  }
+  if (!args.ignorePacing) {
+    const today = countSameLocalDay(published, now, cfg.timezone);
+    if (today >= cfg.dailyCap) {
+      return { ok: false, reason: `Daily cap reached (${today}/${cfg.dailyCap}).` };
+    }
 
-  const week = countTrailingWeek(published, now);
-  if (week >= cfg.weeklyCap) {
-    return { ok: false, reason: `Weekly cap reached (${week}/${cfg.weeklyCap}).` };
-  }
+    const week = countTrailingWeek(published, now);
+    if (week >= cfg.weeklyCap) {
+      return { ok: false, reason: `Weekly cap reached (${week}/${cfg.weeklyCap}).` };
+    }
 
-  const last = published.reduce<Date | null>(
-    (acc, p) => (acc === null || p.publishedAt > acc ? p.publishedAt : acc),
-    null,
-  );
-  if (last) {
-    const gapMinutes = (now.getTime() - last.getTime()) / 60_000;
-    if (gapMinutes < cfg.minGapMinutes) {
-      return {
-        ok: false,
-        reason: `Only ${Math.floor(gapMinutes)}m since the last post; minimum gap is ${cfg.minGapMinutes}m.`,
-      };
+    const last = published.reduce<Date | null>(
+      (acc, p) => (acc === null || p.publishedAt > acc ? p.publishedAt : acc),
+      null,
+    );
+    if (last) {
+      const gapMinutes = (now.getTime() - last.getTime()) / 60_000;
+      if (gapMinutes < cfg.minGapMinutes) {
+        return {
+          ok: false,
+          reason: `Only ${Math.floor(gapMinutes)}m since the last post; minimum gap is ${cfg.minGapMinutes}m.`,
+        };
+      }
     }
   }
 
