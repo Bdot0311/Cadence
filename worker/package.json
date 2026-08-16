@@ -1,0 +1,19 @@
+{
+  "name": "@agent/worker",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "scripts": {
+    "start": "tsx --env-file=../.env src/index.ts",
+    "dev": "tsx watch --env-file=../.env src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@agent/linkedin-client": "*",
+    "@agent/content-engine": "*",
+    "@supabase/supabase-js": "^2.45.0",
+    "zod": "^3.23.8",
+    "tsx": "^4.19.0"
+  }
+}
