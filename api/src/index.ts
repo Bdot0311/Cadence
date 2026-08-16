@@ -262,7 +262,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
 async function dashboardPayload(ownerId: string): Promise<Record<string, unknown>> {
   const { data: accounts, error } = await db.from('accounts')
-    .select('id,urn,display_name,active,paused_until,pause_reason,token_expires_at,refresh_expires_at,created_at,agent_config(*),content_pillars(*),voice_profiles(id,version,profile,active,created_at)')
+    .select('id,urn,display_name,active,paused_until,pause_reason,token_expires_at,refresh_expires_at,created_at,agent_config(*),content_pillars(*),voice_profiles(id,version,profile,source_posts,active,created_at)')
     .eq('owner_id', ownerId).order('created_at', { ascending: true });
   throwDb(error);
   const ids = (accounts ?? []).map((account) => account.id);

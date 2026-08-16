@@ -11,7 +11,7 @@ export interface Account {
   refresh_expires_at: string | null; created_at: string;
   agent_config: Config | Config[] | null;
   content_pillars: Pillar[];
-  voice_profiles: Array<{ id: string; version: number; active: boolean; profile: Record<string, unknown> }>;
+  voice_profiles: Array<{ id: string; version: number; active: boolean; profile: Record<string, unknown>; source_posts: string[] }>;
 }
 export interface Config {
   timezone: string; schedule: Record<string, unknown>; autonomy_mode: string;
