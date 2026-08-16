@@ -1,0 +1,13 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    // No rootDir/outDir: the worker resolves @agent/* to package SOURCE via npm
+    // workspaces, which sits outside any rootDir we could set. It runs under
+    // tsx in dev and is bundled for deploy, so tsc's job here is typechecking
+    // only.
+    "noEmit": true,
+    "declaration": false,
+    "sourceMap": false
+  },
+  "include": ["src/**/*"]
+}

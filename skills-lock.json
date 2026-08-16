@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "anti-ai-slop-writing": {
+      "source": "swan-gtm/gtm-skills",
+      "sourceType": "github",
+      "skillPath": "skills/gali-firon/anti-ai-slop-writing/SKILL.md",
+      "computedHash": "6a288a6b1a131149096a9d61bd5294556bc30a33af703af012e99d2e6ebc3f02"
+    }
+  }
+}

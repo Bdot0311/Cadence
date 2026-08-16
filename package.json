@@ -1,0 +1,19 @@
+{
+  "name": "linkedin-agent",
+  "private": true,
+  "type": "module",
+  "workspaces": ["api", "worker", "dashboard", "packages/*"],
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev": "npm run dev --workspace @agent/api & npm run dev --workspace @agent/dashboard",
+    "worker": "npm run start --workspace @agent/worker",
+    "test": "vitest run",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0",
+    "@types/node": "^22.0.0"
+  }
+}
