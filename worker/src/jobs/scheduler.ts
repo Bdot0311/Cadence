@@ -146,6 +146,7 @@ export async function runSchedulerTick(args: {
         cfg: account.schedule,
         published: alreadyPublished,
         cooldownUntil: account.cooldownUntil,
+        ignoreWindow: post.scheduledAt !== null,
         ...(deps.random ? { random: deps.random } : {}),
       });
 

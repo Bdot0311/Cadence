@@ -159,6 +159,17 @@ describe('pacing', () => {
     );
   });
 
+  it('publishes a human-scheduled post when due even outside the cadence window', async () => {
+    const threeAm = new Date('2026-08-17T07:00:00Z');
+    const h = deps({
+      async duePosts() { return [{ ...post('p1'), scheduledAt: threeAm }]; },
+    });
+    const r = await runSchedulerTick({ now: threeAm, deps: h.deps });
+
+    expect(r).toMatchObject({ published: 1, failed: 0 });
+    expect(h.create).toHaveBeenCalledOnce();
+  });
+
   it('parks a jittered post for a later tick rather than sleeping', async () => {
     const h = deps({ random: () => 0.99 });
     const r = await runSchedulerTick({ now: NOW, deps: h.deps });

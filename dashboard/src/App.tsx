@@ -167,8 +167,29 @@ function Queue({ data, account, api, refresh }: { data: DashboardData; account: 
   async function submit(event: FormEvent) { event.preventDefault(); setSaving(true); setError(''); try { await api.createPost({ accountId: account!.id, pillarId: pillarId || null, body, scheduledAt: null }); setBody(''); await refresh(); } catch (e) { setError(message(e)); } finally { setSaving(false); } }
   return <section className="page"><div className="page-heading"><div><p className="eyebrow">EDITORIAL QUEUE</p><h1>Posts with a <em>reason</em>.</h1><p>Every item is either ready, scheduled, held, or explicitly killed.</p></div></div>
     <div className="queue-layout"><form className="card composer" onSubmit={submit}><div className="card-title"><span>ADD A REVIEWED POST</span><small>{body.length}/3000</small></div><textarea required maxLength={3000} value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write in your real voice. The scheduler will find the right window." /><div className="composer-actions"><select value={pillarId} onChange={(e) => setPillarId(e.target.value)}><option value="">No pillar</option>{pillars.map((p) => <option value={p.id} key={p.id}>{p.name}</option>)}</select><button className="button primary" disabled={saving}>{saving ? 'Adding…' : 'Add to queue'}</button></div>{error && <p className="error">{error}</p>}</form>
-      <div className="post-list">{data.posts.map((post) => <article className="card queue-item" key={post.id}><div className="post-meta"><span>{post.content_pillars?.name ?? 'Unassigned'}</span><span className={`state ${post.state}`}>{post.state}</span></div><p>{post.body}</p><footer><span>{post.scheduled_at ? `Scheduled ${formatDate(post.scheduled_at)}` : post.state === 'draft' ? 'Generated automatically · awaiting your review' : `Added ${post.state}`}</span>{post.state === 'draft' ? <div className="review-actions"><button onClick={async () => { await api.setPostState(post.id, 'killed'); await refresh(); }}>Reject</button><button className="approve" onClick={async () => { await api.setPostState(post.id, 'approved'); await refresh(); }}>Approve for scheduling</button></div> : (post.kill_reason || post.failure_reason) && <strong>{post.kill_reason ?? post.failure_reason}</strong>}</footer></article>)}{data.posts.length === 0 && <div className="card"><EmptyMini title="No posts yet" text="Automatic ideation will place passing drafts here. You can also add one manually." /></div>}</div></div>
+      <div className="post-list">{data.posts.map((post) => <article className="card queue-item" key={post.id}><div className="post-meta"><span>{post.content_pillars?.name ?? 'Unassigned'}</span><span className={`state ${post.state}`}>{post.state}</span></div><p>{post.body}</p><footer><span>{post.scheduled_at ? `Scheduled ${formatDate(post.scheduled_at)}` : post.state === 'draft' ? 'Generated automatically · choose when to publish' : post.state === 'approved' ? 'Approved · choose Post now or a scheduled time' : `Added ${post.state}`}</span>{['draft', 'approved'].includes(post.state) ? <PublishActions postId={post.id} api={api} refresh={refresh} /> : (post.kill_reason || post.failure_reason) && <strong>{post.kill_reason ?? post.failure_reason}</strong>}</footer></article>)}{data.posts.length === 0 && <div className="card"><EmptyMini title="No posts yet" text="Automatic ideation will place passing drafts here. You can also add one manually." /></div>}</div></div>
   </section>;
+}
+
+function PublishActions({ postId, api, refresh }: { postId: string; api: Api; refresh: () => Promise<void> }) {
+  const [scheduledLocal, setScheduledLocal] = useState('');
+  const [busy, setBusy] = useState<'now' | 'schedule' | 'reject' | null>(null);
+  const [error, setError] = useState('');
+  async function act(kind: 'now' | 'schedule' | 'reject') {
+    setBusy(kind); setError('');
+    try {
+      if (kind === 'reject') await api.setPostState(postId, 'killed');
+      else {
+        const at = kind === 'now' ? new Date() : new Date(scheduledLocal);
+        if (Number.isNaN(at.getTime())) throw new Error('Choose a valid date and time.');
+        if (kind === 'schedule' && at.getTime() <= Date.now()) throw new Error('Choose a future time.');
+        await api.setPostState(postId, 'scheduled', at.toISOString());
+      }
+      await refresh();
+    } catch (e) { setError(message(e)); }
+    finally { setBusy(null); }
+  }
+  return <div className="publish-actions"><div className="review-actions"><button disabled={busy !== null} onClick={() => void act('reject')}>{busy === 'reject' ? 'Rejecting…' : 'Reject'}</button><button className="approve" disabled={busy !== null} onClick={() => void act('now')}>{busy === 'now' ? 'Queuing…' : 'Post now'}</button></div><div className="schedule-controls"><input aria-label="Schedule date and time" type="datetime-local" value={scheduledLocal} min={toLocalDateTimeInput(new Date(Date.now() + 60_000))} onChange={(event) => setScheduledLocal(event.target.value)} /><button disabled={!scheduledLocal || busy !== null} onClick={() => void act('schedule')}>{busy === 'schedule' ? 'Scheduling…' : 'Schedule'}</button></div>{error && <small className="error">{error}</small>}</div>;
 }
 
 function Decisions({ data }: { data: DashboardData }) {
@@ -253,5 +274,6 @@ function NavIcon({ name }: { name: View }) { return <span className="nav-icon" a
 function greeting() { const hour = new Date().getHours(); return hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'; }
 function parseVoicePosts(value: string): string[] { return value.split(/(?:^|\n)\s*---+\s*(?=\n|$)/).map((post) => post.trim()).filter((post) => post.length >= 40); }
 function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value)); }
+function toLocalDateTimeInput(value: Date) { const offset = value.getTimezoneOffset() * 60_000; return new Date(value.getTime() - offset).toISOString().slice(0, 16); }
 function relative(value: string) { const diff = new Date(value).getTime() - Date.now(); const abs = Math.abs(diff); const unit = abs < 3_600_000 ? 'minute' : abs < 86_400_000 ? 'hour' : 'day'; const size = unit === 'minute' ? 60_000 : unit === 'hour' ? 3_600_000 : 86_400_000; return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(Math.round(diff / size), unit); }
 function message(error: unknown) { return error instanceof Error ? error.message : String(error); }

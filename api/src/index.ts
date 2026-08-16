@@ -225,13 +225,24 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   const postState = url.pathname.match(/^\/api\/posts\/([0-9a-f-]+)\/state$/i);
   if (req.method === 'PATCH' && postState) {
-    const input = z.object({ state: z.enum(['approved', 'scheduled', 'killed']) }).parse(await body(req));
+    const input = z.object({
+      state: z.enum(['approved', 'scheduled', 'killed']),
+      scheduledAt: z.string().datetime().nullable().optional(),
+    }).superRefine((value, ctx) => {
+      if (value.state === 'scheduled' && !value.scheduledAt) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['scheduledAt'], message: 'A scheduled time is required.' });
+      }
+    }).parse(await body(req));
     const postId = postState[1] as string;
     const { data: post, error: postError } = await db.from('post_queue').select('account_id').eq('id', postId).single();
     throwDb(postError);
     if (!post) throw new ApiError(404, 'Post not found');
     await requireOwnedAccount(user.id, post.account_id);
-    const { error } = await db.from('post_queue').update({ state: input.state }).eq('id', postId);
+    const { error } = await db.from('post_queue').update({
+      state: input.state,
+      scheduled_at: input.state === 'scheduled' ? input.scheduledAt : null,
+      failure_reason: null,
+    }).eq('id', postId);
     throwDb(error);
     return send(res, 200, { ok: true });
   }

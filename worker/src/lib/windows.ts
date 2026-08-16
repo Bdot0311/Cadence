@@ -131,6 +131,8 @@ export function findSlot(args: {
   now: Date;
   cfg: ScheduleConfig;
   published: PublishedPost[];
+  /** A human-selected time may bypass the cadence window, but never caps or spacing. */
+  ignoreWindow?: boolean;
   /** Injectable for tests. */
   random?: () => number;
   /** Set when the account is cooling down after a badly underperforming post. */
@@ -146,7 +148,7 @@ export function findSlot(args: {
     };
   }
 
-  if (!isInWindow(now, cfg)) {
+  if (!args.ignoreWindow && !isInWindow(now, cfg)) {
     return { ok: false, reason: 'Outside every configured publishing window.' };
   }
 
@@ -173,6 +175,9 @@ export function findSlot(args: {
       };
     }
   }
+
+  // Human-selected times are exact. Automatic cadence receives bounded jitter.
+  if (args.ignoreWindow) return { ok: true, scheduledAt: now };
 
   // Jitter forward, clamped so we never spill past the window's end.
   const { weekday, minutes } = localParts(now, cfg.timezone);
