@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { LinkedInClient } from '@agent/linkedin-client';
 import { z } from 'zod';
+import WebSocket from 'ws';
 import { SupabaseWriteGuard } from './lib/guard.js';
 import { runSchedulerTick } from './jobs/scheduler.js';
 import { runTokenRefresh } from './jobs/refresh-tokens.js';
@@ -16,6 +17,7 @@ const Env = z.object({
   LINKEDIN_REDIRECT_URI: z.string().url(),
   LINKEDIN_API_VERSION: z.string().regex(/^\d{6}$/),
   LINKEDIN_SCOPES: z.string().default('openid profile email w_member_social'),
+  TOKEN_ENCRYPTION_KEY: z.string().min(32),
   AGENT_KILL_SWITCH: z.string().default('false'),
   AGENT_DRY_RUN: z.string().default('true'),
   DAILY_WRITE_BUDGET: z.coerce.number().int().positive().default(80),
@@ -27,10 +29,12 @@ const Env = z.object({
 });
 
 const env = Env.parse(process.env);
+const webSocketTransport = WebSocket as unknown as new (address: string | URL, protocols?: string | string[]) => any;
 const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
+  realtime: { transport: webSocketTransport },
 });
-const store = new SupabaseRuntimeStore(db);
+const store = new SupabaseRuntimeStore(db, env.TOKEN_ENCRYPTION_KEY);
 const guard = new SupabaseWriteGuard(store, {
   envKillSwitch: truthy(env.AGENT_KILL_SWITCH),
   envDryRun: truthy(env.AGENT_DRY_RUN),

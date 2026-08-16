@@ -12,7 +12,7 @@ import type { ScheduleConfig } from './lib/windows.js';
 type JsonObject = Record<string, unknown>;
 
 export class SupabaseRuntimeStore implements GuardStore {
-  constructor(private readonly db: SupabaseClient) {}
+  constructor(private readonly db: SupabaseClient, private readonly encryptionSecret: string) {}
 
   async writesToday(accountId: string): Promise<number> {
     const since = new Date();
@@ -213,6 +213,7 @@ export class SupabaseRuntimeStore implements GuardStore {
       new_token_expires_at: tokens.expiresAt.toISOString(),
       new_refresh_expires_at: tokens.refreshExpiresAt?.toISOString() ?? null,
       new_scopes: tokens.scopes,
+      encryption_secret: this.encryptionSecret,
     });
     throwIf(error);
   }
@@ -256,6 +257,7 @@ export class SupabaseRuntimeStore implements GuardStore {
   private async tokens(accountId: string): Promise<{ accessToken: string; refreshToken: string | null }> {
     const { data, error } = await this.db.rpc('get_account_tokens', {
       target_account_id: accountId,
+      encryption_secret: this.encryptionSecret,
     });
     throwIf(error);
     const row = Array.isArray(data) ? data[0] : data;

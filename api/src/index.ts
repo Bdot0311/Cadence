@@ -1,25 +1,35 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { resolve } from 'node:path';
 import { createClient, type SupabaseClient, type User } from '@supabase/supabase-js';
 import { LinkedInClient, type LedgerEntry } from '@agent/linkedin-client';
+import WebSocket from 'ws';
 import { z } from 'zod';
+import { writeEnvFile } from './env-file.js';
 
 const Env = z.object({
   SUPABASE_URL: z.string().url(),
   SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-  LINKEDIN_CLIENT_ID: z.string().min(1),
-  LINKEDIN_CLIENT_SECRET: z.string().min(1),
-  LINKEDIN_REDIRECT_URI: z.string().url(),
-  LINKEDIN_API_VERSION: z.string().regex(/^\d{6}$/),
+  LINKEDIN_CLIENT_ID: z.string().default(''),
+  LINKEDIN_CLIENT_SECRET: z.string().default(''),
+  LINKEDIN_REDIRECT_URI: z.string().url().default('http://localhost:8080/auth/linkedin/callback'),
+  LINKEDIN_API_VERSION: z.string().regex(/^\d{6}$/).default('202608'),
   LINKEDIN_SCOPES: z.string().default('openid profile email w_member_social'),
   API_PORT: z.coerce.number().int().positive().default(8080),
   DASHBOARD_URL: z.string().url().default('http://localhost:5173'),
-  OAUTH_STATE_SECRET: z.string().min(32),
+  OAUTH_STATE_SECRET: z.string().default(''),
+  TOKEN_ENCRYPTION_KEY: z.string().default(''),
+  API_PUBLIC_URL: z.string().url().default('http://localhost:8080'),
+  ENV_FILE_PATH: z.string().optional(),
 });
 
 const env = Env.parse(process.env);
+const oauthStateSecret = env.OAUTH_STATE_SECRET || randomBytes(32).toString('base64url');
+const envFilePath = env.ENV_FILE_PATH ?? resolve(process.cwd(), '..', '.env');
+const webSocketTransport = WebSocket as unknown as new (address: string | URL, protocols?: string | string[]) => any;
 const db = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false, autoRefreshToken: false },
+  realtime: { transport: webSocketTransport },
 });
 
 const linkedin = new LinkedInClient({
@@ -61,6 +71,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
   }
 
   if (req.method === 'GET' && url.pathname === '/auth/linkedin/callback') {
+    assertLinkedInConfigured();
     const code = requiredQuery(url, 'code');
     const state = verifyState(requiredQuery(url, 'state'));
     const tokens = await linkedin.oauth.exchangeCode(code);
@@ -74,6 +85,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
       new_token_expires_at: tokens.expiresAt.toISOString(),
       new_refresh_expires_at: tokens.refreshExpiresAt?.toISOString() ?? null,
       new_scopes: tokens.scopes,
+      encryption_secret: env.TOKEN_ENCRYPTION_KEY,
     });
     throwDb(error);
     res.statusCode = 302;
@@ -84,7 +96,39 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   const user = await authenticate(req);
 
+  if (req.method === 'GET' && url.pathname === '/api/settings/status') {
+    return send(res, 200, {
+      linkedinClientIdConfigured: Boolean(env.LINKEDIN_CLIENT_ID),
+      linkedinClientSecretConfigured: Boolean(env.LINKEDIN_CLIENT_SECRET),
+      anthropicApiKeyConfigured: Boolean(process.env.ANTHROPIC_API_KEY),
+      tokenEncryptionConfigured: Boolean(env.TOKEN_ENCRYPTION_KEY),
+    });
+  }
+
+  if (req.method === 'PUT' && url.pathname === '/api/settings/credentials') {
+    const input = CredentialsInput.parse(await body(req));
+    const tokenEncryptionKey = env.TOKEN_ENCRYPTION_KEY || randomBytes(32).toString('base64');
+    await writeEnvFile(envFilePath, {
+      LINKEDIN_CLIENT_ID: input.linkedinClientId,
+      LINKEDIN_CLIENT_SECRET: input.linkedinClientSecret,
+      ANTHROPIC_API_KEY: input.anthropicApiKey,
+      TOKEN_ENCRYPTION_KEY: tokenEncryptionKey,
+      OAUTH_STATE_SECRET: env.OAUTH_STATE_SECRET || oauthStateSecret,
+      LINKEDIN_REDIRECT_URI: `${env.API_PUBLIC_URL}/auth/linkedin/callback`,
+      LINKEDIN_API_VERSION: env.LINKEDIN_API_VERSION,
+      LINKEDIN_SCOPES: env.LINKEDIN_SCOPES,
+      ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
+      ANTHROPIC_EFFORT: process.env.ANTHROPIC_EFFORT || 'high',
+      API_PUBLIC_URL: env.API_PUBLIC_URL,
+      DASHBOARD_URL: env.DASHBOARD_URL,
+      VITE_API_URL: env.API_PUBLIC_URL,
+      AGENT_DRY_RUN: process.env.AGENT_DRY_RUN || 'true',
+    });
+    return send(res, 200, { saved: true, restartRequired: true });
+  }
+
   if (req.method === 'POST' && url.pathname === '/auth/linkedin/start') {
+    assertLinkedInConfigured();
     const state = signState({ ownerId: user.id, nonce: randomBytes(16).toString('hex'), exp: Date.now() + 10 * 60_000 });
     return send(res, 200, { url: linkedin.oauth.authorizationUrl(state) });
   }
@@ -249,6 +293,11 @@ async function dashboardPayload(ownerId: string): Promise<Record<string, unknown
 }
 
 const VoiceInput = z.object({ accountId: z.string().uuid().optional(), posts: z.array(z.string().min(40)).min(10).max(30) });
+const CredentialsInput = z.object({
+  linkedinClientId: z.string().trim().min(3).max(500).refine((value) => !/[\r\n]/.test(value)),
+  linkedinClientSecret: z.string().min(8).max(2000).refine((value) => !/[\r\n]/.test(value)),
+  anthropicApiKey: z.string().min(20).max(2000).refine((value) => !/[\r\n]/.test(value)),
+});
 const PillarsInput = z.object({
   accountId: z.string().uuid().optional(),
   pillars: z.array(z.object({ name: z.string().min(1).max(80), description: z.string().min(1).max(500), targetShare: z.number().min(0).max(1) })).min(1).max(10),
@@ -302,14 +351,14 @@ async function requireOwnedAccount(ownerId: string, requested?: string): Promise
 
 function signState(payload: { ownerId: string; nonce: string; exp: number }): string {
   const encoded = Buffer.from(JSON.stringify(payload)).toString('base64url');
-  const signature = createHmac('sha256', env.OAUTH_STATE_SECRET).update(encoded).digest('base64url');
+  const signature = createHmac('sha256', oauthStateSecret).update(encoded).digest('base64url');
   return `${encoded}.${signature}`;
 }
 
 function verifyState(value: string): { ownerId: string; nonce: string; exp: number } {
   const [encoded, supplied] = value.split('.');
   if (!encoded || !supplied) throw new ApiError(400, 'Invalid OAuth state');
-  const expected = createHmac('sha256', env.OAUTH_STATE_SECRET).update(encoded).digest();
+  const expected = createHmac('sha256', oauthStateSecret).update(encoded).digest();
   const suppliedBuffer = Buffer.from(supplied, 'base64url');
   if (expected.length !== suppliedBuffer.length || !timingSafeEqual(expected, suppliedBuffer)) throw new ApiError(400, 'Invalid OAuth state');
   const payload = z.object({ ownerId: z.string().uuid(), nonce: z.string().min(16), exp: z.number() }).parse(JSON.parse(Buffer.from(encoded, 'base64url').toString()));
@@ -355,4 +404,9 @@ function requiredQuery(url: URL, key: string): string {
 function throwDb(error: { message: string } | null): void { if (error) throw new Error(error.message); }
 function startOfUtcDay(): string { const d = new Date(); d.setUTCHours(0, 0, 0, 0); return d.toISOString(); }
 function emptyStats(): Record<string, number | null> { return { published: 0, queued: 0, killed: 0, failed: 0, writesToday: 0, quotaRemaining: null }; }
+function assertLinkedInConfigured(): void {
+  if (!env.LINKEDIN_CLIENT_ID || !env.LINKEDIN_CLIENT_SECRET || !env.TOKEN_ENCRYPTION_KEY) {
+    throw new ApiError(409, 'Configure LinkedIn credentials in Settings, then restart the API.');
+  }
+}
 class ApiError extends Error { constructor(readonly status: number, message: string) { super(message); } }

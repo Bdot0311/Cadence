@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import type { Session, SupabaseClient } from '@supabase/supabase-js';
-import { Api, oneConfig, type Account, type DashboardData } from './api.js';
+import { Api, oneConfig, type Account, type CredentialStatus, type DashboardData } from './api.js';
 
-type View = 'overview' | 'queue' | 'decisions' | 'setup';
+type View = 'overview' | 'queue' | 'decisions' | 'setup' | 'settings';
 
 export function App({ supabase, apiUrl }: { supabase: SupabaseClient; apiUrl: string }) {
   const [session, setSession] = useState<Session | null>(null);
@@ -64,7 +64,7 @@ function ControlRoom({ supabase, session, apiUrl }: { supabase: SupabaseClient; 
   return <div className="app-shell">
     <aside className="sidebar">
       <div className="wordmark"><Mark /> CADENCE</div>
-      <nav>{(['overview', 'queue', 'decisions', 'setup'] as View[]).map((item) => <button key={item} className={view === item ? 'active' : ''} onClick={() => setView(item)}><NavIcon name={item} />{item}</button>)}</nav>
+      <nav>{(['overview', 'queue', 'decisions', 'setup', 'settings'] as View[]).map((item) => <button key={item} className={view === item ? 'active' : ''} onClick={() => setView(item)}><NavIcon name={item} />{item}</button>)}</nav>
       <div className="sidebar-bottom"><div className="operator"><span>{(session.user.email?.[0] ?? 'O').toUpperCase()}</span><div><strong>{session.user.email?.split('@')[0]}</strong><small>Operator</small></div></div><button className="signout" onClick={() => void supabase.auth.signOut()}>Sign out</button></div>
     </aside>
     <main className="workspace">
@@ -74,6 +74,7 @@ function ControlRoom({ supabase, session, apiUrl }: { supabase: SupabaseClient; 
       {view === 'queue' && <Queue data={data} account={account} api={api} refresh={refresh} />}
       {view === 'decisions' && <Decisions data={data} />}
       {view === 'setup' && <Setup account={account} api={api} refresh={refresh} />}
+      {view === 'settings' && <Settings api={api} />}
     </main>
   </div>;
 }
@@ -132,6 +133,46 @@ function Setup({ account, api, refresh }: { account: Account | null; api: Api; r
 }
 
 function SetupCard({ number, title, done, detail, children }: { number: string; title: string; done: boolean; detail: string; children: ReactNode }) { return <article className="card setup-card"><div className="setup-number">{done ? '✓' : number}</div><div className="setup-content"><div><h3>{title}</h3><p>{detail}</p></div><div className="setup-controls">{children}</div></div></article>; }
+function Settings({ api }: { api: Api }) {
+  const [status, setStatus] = useState<CredentialStatus | null>(null);
+  const [linkedinClientId, setLinkedinClientId] = useState('');
+  const [linkedinClientSecret, setLinkedinClientSecret] = useState('');
+  const [anthropicApiKey, setAnthropicApiKey] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [messageText, setMessageText] = useState('');
+  useEffect(() => { void api.getCredentialStatus().then(setStatus).catch((error) => setMessageText(message(error))); }, [api]);
+  async function submit(event: FormEvent) {
+    event.preventDefault(); setSaving(true); setMessageText('');
+    try {
+      const result = await api.saveCredentials({ linkedinClientId, linkedinClientSecret, anthropicApiKey });
+      setLinkedinClientSecret(''); setAnthropicApiKey('');
+      setStatus({ linkedinClientIdConfigured: true, linkedinClientSecretConfigured: true, anthropicApiKeyConfigured: true, tokenEncryptionConfigured: true });
+      setMessageText(result.restartRequired ? 'Saved securely. Restart the API and worker to activate the new credentials.' : 'Saved securely.');
+    } catch (error) { setMessageText(message(error)); }
+    finally { setSaving(false); }
+  }
+  const complete = status && status.linkedinClientIdConfigured && status.linkedinClientSecretConfigured && status.anthropicApiKeyConfigured && status.tokenEncryptionConfigured;
+  return <section className="page"><div className="page-heading"><div><p className="eyebrow">PRIVATE SETTINGS</p><h1>Connect the <em>engines</em>.</h1><p>Secrets are written to the server’s local environment file and are never returned to this browser.</p></div></div>
+    {messageText && <div className="notice slim">{messageText}</div>}
+    <div className="settings-grid">
+      <form className="card settings-form" onSubmit={submit} autoComplete="off">
+        <div className="card-title"><span>PROVIDER CREDENTIALS</span><small>{complete ? 'Configured' : 'Action required'}</small></div>
+        <div className="settings-fields">
+          <label>LinkedIn Client ID<input required minLength={3} value={linkedinClientId} onChange={(e) => setLinkedinClientId(e.target.value)} placeholder={status?.linkedinClientIdConfigured ? 'Configured — enter to replace' : 'From LinkedIn Developer Portal'} autoComplete="off" /></label>
+          <label>LinkedIn Client Secret<input required minLength={8} type="password" value={linkedinClientSecret} onChange={(e) => setLinkedinClientSecret(e.target.value)} placeholder={status?.linkedinClientSecretConfigured ? 'Configured — enter to replace' : 'Client secret'} autoComplete="new-password" /></label>
+          <label>Anthropic API Key<input required minLength={20} type="password" value={anthropicApiKey} onChange={(e) => setAnthropicApiKey(e.target.value)} placeholder={status?.anthropicApiKeyConfigured ? 'Configured — enter to replace' : 'sk-ant-…'} autoComplete="new-password" /></label>
+          <button className="button primary" disabled={saving}>{saving ? 'Saving…' : 'Save credentials'}</button>
+        </div>
+      </form>
+      <article className="card settings-status"><div className="card-title"><span>READINESS</span><small>Values stay hidden</small></div><div className="readiness-list">
+        <Readiness label="LinkedIn application" ready={Boolean(status?.linkedinClientIdConfigured && status?.linkedinClientSecretConfigured)} />
+        <Readiness label="Anthropic generation" ready={Boolean(status?.anthropicApiKeyConfigured)} />
+        <Readiness label="Token encryption" ready={Boolean(status?.tokenEncryptionConfigured)} />
+      </div><p className="settings-note">After saving, restart the local API and worker. Then use Setup to connect your LinkedIn profile through OAuth.</p></article>
+    </div>
+  </section>;
+}
+function Readiness({ label, ready }: { label: string; ready: boolean }) { return <div><span>{label}</span><strong className={ready ? 'ready' : ''}>{ready ? 'READY' : 'MISSING'}</strong></div>; }
 function EmptyConnect({ onSetup }: { onSetup: () => void }) { return <section className="empty-connect"><div className="orbit"><Mark /></div><p className="eyebrow">ONE CONNECTION AWAY</p><h1>Give Cadence a profile<br />to <em>protect</em>.</h1><p>Connect LinkedIn, teach it your voice, and start a seven-day observation period.</p><button className="button primary" onClick={onSetup}>Begin setup <Arrow /></button></section>; }
 function Metric({ label, value, detail }: { label: string; value: number; detail: string }) { return <article className="metric"><span>{label}</span><strong>{String(value).padStart(2, '0')}</strong><small>{detail}</small></article>; }
 function EmptyMini({ title, text }: { title: string; text: string }) { return <div className="empty-mini"><strong>{title}</strong><p>{text}</p></div>; }
@@ -139,7 +180,7 @@ function Loading({ label }: { label: string }) { return <main className="loading
 function ErrorState({ error, retry }: { error: string; retry: () => void }) { return <main className="loading"><strong>Couldn’t open Cadence</strong><p>{error}</p><button className="button primary" onClick={retry}>Try again</button></main>; }
 function Mark() { return <span className="mark" aria-hidden="true"><i /><i /><i /></span>; }
 function Arrow() { return <span aria-hidden="true">↗</span>; }
-function NavIcon({ name }: { name: View }) { return <span className="nav-icon" aria-hidden="true">{name === 'overview' ? '◫' : name === 'queue' ? '≡' : name === 'decisions' ? '⌁' : '⌘'}</span>; }
+function NavIcon({ name }: { name: View }) { return <span className="nav-icon" aria-hidden="true">{name === 'overview' ? '◫' : name === 'queue' ? '≡' : name === 'decisions' ? '⌁' : name === 'settings' ? '⚙' : '⌘'}</span>; }
 function greeting() { const hour = new Date().getHours(); return hour < 12 ? 'morning' : hour < 18 ? 'afternoon' : 'evening'; }
 function formatDate(value: string) { return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(new Date(value)); }
 function relative(value: string) { const diff = new Date(value).getTime() - Date.now(); const abs = Math.abs(diff); const unit = abs < 3_600_000 ? 'minute' : abs < 86_400_000 ? 'hour' : 'day'; const size = unit === 'minute' ? 60_000 : unit === 'hour' ? 3_600_000 : 86_400_000; return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(Math.round(diff / size), unit); }

@@ -25,10 +25,20 @@ export interface Post {
   content_pillars: { name: string } | null;
 }
 export interface LogEntry { id: string; level: string; stage: string; decision: string; rationale: string; created_at: string }
+export interface CredentialStatus {
+  linkedinClientIdConfigured: boolean;
+  linkedinClientSecretConfigured: boolean;
+  anthropicApiKeyConfigured: boolean;
+  tokenEncryptionConfigured: boolean;
+}
 
 export class Api {
   constructor(private readonly base: string, private readonly token: () => Promise<string>) {}
   getDashboard(): Promise<DashboardData> { return this.request('/api/dashboard'); }
+  getCredentialStatus(): Promise<CredentialStatus> { return this.request('/api/settings/status'); }
+  saveCredentials(input: { linkedinClientId: string; linkedinClientSecret: string; anthropicApiKey: string }): Promise<{ saved: boolean; restartRequired: boolean }> {
+    return this.request('/api/settings/credentials', { method: 'PUT', body: JSON.stringify(input) });
+  }
   startLinkedIn(): Promise<{ url: string }> { return this.request('/auth/linkedin/start', { method: 'POST' }); }
   saveVoice(posts: string[], accountId?: string): Promise<unknown> { return this.request('/api/voice-profile', { method: 'POST', body: JSON.stringify({ posts, accountId }) }); }
   savePillars(pillars: Array<{ name: string; description: string; targetShare: number }>, accountId?: string): Promise<unknown> { return this.request('/api/pillars', { method: 'PUT', body: JSON.stringify({ pillars, accountId }) }); }
