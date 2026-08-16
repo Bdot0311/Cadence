@@ -148,7 +148,7 @@ describe('draftWithGates', () => {
   it('does not spend a critique call when layer 1 already failed', async () => {
     const h = fakeModel(['A draft with an em dash — right here.']);
     await draftWithGates({ request: request(), model: h.model });
-    // Three drafting calls, zero critique calls: the cheap check short-circuits.
+    // Every drafting attempt short-circuits before the more expensive critique.
     expect(h.textCalls).toHaveLength(MAX_GATE_LOOPS);
     expect(h.critiqueCalls).toBe(0);
   });
@@ -158,9 +158,9 @@ describe('draftWithGates', () => {
       request: request(),
       model: fakeModel(['Thrilled to announce this.']).model,
     });
-    // 3 drafting calls at 100 in / 200 out, no critique calls (short-circuited).
-    expect(out.usage.inputTokens).toBe(300);
-    expect(out.usage.outputTokens).toBe(600);
+    // Every configured attempt is included in the aggregate usage.
+    expect(out.usage.inputTokens).toBe(MAX_GATE_LOOPS * 100);
+    expect(out.usage.outputTokens).toBe(MAX_GATE_LOOPS * 200);
   });
 });
 

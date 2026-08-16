@@ -2,7 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
   costUsd,
+  detectSlop,
   draftWithGates,
+  hasBlockingViolations,
+  PRODUCT_FACTS_PROMPT,
   selectCandidates,
   type Candidate,
   type CtaPolicy,
@@ -15,23 +18,23 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const Ideas = z.object({
   ideas: z.array(z.object({
-    angle: z.string().min(20).max(500),
-    pillarId: z.string().uuid(),
-    sourcePostIndexes: z.array(z.number().int().min(1).max(20)).min(1).max(3),
-  })).min(3).max(9),
+    angle: z.string(),
+    pillarId: z.string(),
+    sourcePostIndexes: z.array(z.number().int()),
+  })),
 });
 
 const IDEAS_JSON_SCHEMA = {
   type: 'object',
   properties: {
     ideas: {
-      type: 'array', minItems: 3, maxItems: 9,
+      type: 'array',
       items: {
         type: 'object',
         properties: {
-          angle: { type: 'string', minLength: 20, maxLength: 500 },
-          pillarId: { type: 'string', format: 'uuid' },
-          sourcePostIndexes: { type: 'array', minItems: 1, maxItems: 3, items: { type: 'integer', minimum: 1, maximum: 20 } },
+          angle: { type: 'string' },
+          pillarId: { type: 'string' },
+          sourcePostIndexes: { type: 'array', items: { type: 'integer' } },
         },
         required: ['angle', 'pillarId', 'sourcePostIndexes'],
         additionalProperties: false,
@@ -104,7 +107,8 @@ export async function runIdeation(args: {
         'You are an editorial strategist generating grounded LinkedIn post angles for one founder.',
         'Return distinct ideas, not drafts. Every idea must be supported by the numbered source posts.',
         'Use only the exact pillar IDs provided. Avoid generic advice, invented facts, metrics, or events.',
-        'Prefer a concrete tension, decision, lesson, observation, or contrarian operating principle.',
+        'Prefer a concrete decision, lesson, observation, or affirmative operating principle.',
+        'The angle itself must contain no negation, em dash, rule-of-three list, rhetorical question, or contrast framing.',
       ].join('\n'),
       user: [
         `Generate ${Math.min(9, Math.max(3, needed * 3))} candidate angles.`,
@@ -123,14 +127,25 @@ export async function runIdeation(args: {
       continue;
     }
 
-    const ideas = ideaCall.value.ideas.map((idea): Candidate => ({
+    const pillarIds = new Set(pillars.map((pillar: any) => pillar.id));
+    const normalizedIdeas = ideaCall.value.ideas.slice(0, 9).flatMap((idea) => {
+      const angle = idea.angle.trim();
+      const sourcePostIndexes = [...new Set(idea.sourcePostIndexes)]
+        .filter((index) => index >= 1 && index <= sourcePosts.length)
+        .slice(0, 3);
+      if (angle.length < 20 || angle.length > 500 || !pillarIds.has(idea.pillarId) || sourcePostIndexes.length === 0) return [];
+      return [{ ...idea, angle, sourcePostIndexes }];
+    });
+    const cleanIdeas = normalizedIdeas.filter((idea) =>
+      !hasBlockingViolations(detectSlop(idea.angle)) && !containsNegation(idea.angle));
+    const ideas = cleanIdeas.map((idea): Candidate => ({
       id: randomUUID(), angle: idea.angle, pillarId: idea.pillarId,
       topicTokens: topicTokens(idea.angle), structureHash: null,
     }));
     const selected = selectCandidates({ candidates: ideas, pillars: pillarInputs, recent, now: args.now, take: needed }).selected;
 
     for (const pick of selected) {
-      const rawIdea = ideaCall.value.ideas.find((idea) => idea.angle === pick.candidate.angle && idea.pillarId === pick.candidate.pillarId);
+      const rawIdea = cleanIdeas.find((idea) => idea.angle === pick.candidate.angle && idea.pillarId === pick.candidate.pillarId);
       const pillar = pillars.find((candidate: any) => candidate.id === pick.candidate.pillarId);
       if (!rawIdea || !pillar) continue;
       const groundedPosts = rawIdea.sourcePostIndexes.flatMap((index) => sourcePosts[index - 1] ? [sourcePosts[index - 1] as string] : []);
@@ -144,7 +159,7 @@ export async function runIdeation(args: {
           ctaPolicy: toCtaPolicy(config?.['cta_policy']),
           blockedTopics: stringArray(config?.['blocked_topics']),
           blockedClaims: stringArray(config?.['blocked_claims']),
-          sourceContext: groundedPosts.join('\n\n---\n\n'),
+          sourceContext: `${groundedPosts.join('\n\n---\n\n')}\n\n--- ALLOWED PRODUCT FACTS ---\n${PRODUCT_FACTS_PROMPT}`,
         },
       });
       result.costUsd += costUsd(draft.usage.inputTokens, draft.usage.outputTokens);
@@ -195,7 +210,8 @@ export async function runIdeation(args: {
 async function recentPosts(db: SupabaseClient, accountId: string, now: Date): Promise<RecentPost[]> {
   const since = new Date(now.getTime() - 10 * 86_400_000).toISOString();
   const { data, error } = await db.from('post_queue').select('pillar_id,published_at,created_at,body,structure_hash')
-    .eq('account_id', accountId).gte('created_at', since).not('pillar_id', 'is', null);
+    .eq('account_id', accountId).in('state', ['draft', 'approved', 'scheduled', 'published'])
+    .gte('created_at', since).not('pillar_id', 'is', null);
   throwIf(error);
   return (data ?? []).map((post) => ({
     pillarId: post.pillar_id,
@@ -230,6 +246,10 @@ function toCtaPolicy(value: unknown): CtaPolicy {
 function topicTokens(value: string): string[] {
   const stop = new Set(['about','after','again','also','because','been','before','being','between','could','every','from','have','into','more','most','only','other','over','should','some','than','that','their','there','these','they','this','those','through','under','very','what','when','where','which','while','with','would','your']);
   return [...new Set((value.toLowerCase().match(/[a-z][a-z'-]{3,}/g) ?? []).filter((token) => !stop.has(token)))].slice(0, 24);
+}
+
+function containsNegation(value: string): boolean {
+  return /\b(?:no|not|never|nothing|neither|nor|isn't|aren't|wasn't|weren't|don't|doesn't|didn't|can't|cannot|couldn't|won't|wouldn't|shouldn't|without|instead)\b/i.test(value);
 }
 
 function first(value: unknown): unknown { return Array.isArray(value) ? value[0] ?? null : value; }

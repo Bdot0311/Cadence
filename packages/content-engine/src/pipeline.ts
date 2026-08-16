@@ -12,7 +12,7 @@ import { formatViolationsForRetry, runSlopGate } from './slop-gate.js';
 export const DRAFTING_PROMPT_VERSION = 'drafting/v1';
 
 /** Max regeneration loops before the draft is killed. */
-export const MAX_GATE_LOOPS = 3;
+export const MAX_GATE_LOOPS = 5;
 
 export interface VoiceProfile {
   sentenceLength: { mean: number; stddev: number };
@@ -254,6 +254,9 @@ export async function draftWithGates(args: {
 
     userMessage = [
       userMessage.split('\n\nYour previous draft')[0],
+      '',
+      'The original angle wording is not binding. Preserve only the grounded subject and rebuild the framing from a direct affirmative claim.',
+      'Do not reuse any sentence structure named in the violations.',
       '',
       `Your previous draft:\n<draft>\n${lastDraft}\n</draft>`,
       '',
