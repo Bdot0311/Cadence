@@ -26,23 +26,75 @@ function SignIn({ supabase }: { supabase: SupabaseClient }) {
     const { error: authError } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
     if (authError) setError(authError.message); else setSent(true);
   }
-  return <main className="auth-shell">
-    <section className="auth-story">
-      <div className="wordmark"><Mark /> CADENCE</div>
-      <div><p className="eyebrow">AUTONOMOUS LINKEDIN OPERATIONS</p><h1>Your voice.<br /><em>On schedule.</em></h1><p className="lede">A quiet editorial system that drafts, challenges, and publishes—without turning your profile into a content machine.</p></div>
-      <p className="footnote">Built for one careful operator, not a growth team.</p>
+  return <main className="landing">
+    <nav className="landing-nav" aria-label="Main navigation">
+      <a className="wordmark" href="#top" aria-label="Cadence home"><Mark /> CADENCE</a>
+      <div className="landing-links"><a href="#how">How it works</a><a href="#safety">Safety</a><a href="#access">Pricing</a></div>
+      <a className="nav-cta" href="#access">Open control room <Arrow /></a>
+    </nav>
+
+    <section className="landing-hero" id="top">
+      <div className="hero-copy">
+        <p className="eyebrow">AUTONOMOUS LINKEDIN OPERATIONS</p>
+        <h1>Your expertise.<br /><em>Kept in motion.</em></h1>
+        <p className="hero-lede">Cadence learns how you write, challenges every claim, and publishes at a human pace. Your LinkedIn stays active without sounding automated.</p>
+        <div className="hero-actions"><a className="button primary" href="#access">Start your cadence <Arrow /></a><a className="text-link" href="#how">See how it thinks ↓</a></div>
+        <div className="trust-line"><span>7-day observation mode</span><span>One-click kill switch</span><span>Every decision logged</span></div>
+      </div>
+      <div className="hero-product" aria-label="Cadence control room preview">
+        <div className="product-window">
+          <div className="product-bar"><div className="mini-wordmark"><Mark /> CADENCE</div><span><i /> System watching</span></div>
+          <div className="product-body">
+            <aside><b>◫</b><b>≡</b><b>⌁</b><b>⌘</b></aside>
+            <div className="product-canvas">
+              <div className="preview-heading"><span>OPERATIONS OVERVIEW</span><strong>Good morning, <em>Brandon.</em></strong></div>
+              <div className="preview-metrics"><div><small>PUBLISHED</small><b>12</b></div><div><small>READY</small><b>03</b></div><div><small>QUALITY KILLS</small><b>04</b></div></div>
+              <div className="preview-cards"><article><small>NEXT IN CADENCE</small><p>Most teams don’t have a lead problem. They have a follow-through problem.</p><footer><span>Operator lessons</span><b>SCHEDULED</b></footer></article><article className="preview-log"><small>RECENT DECISIONS</small><p><i /> Claim verified against company facts</p><p><i /> Similarity gate passed</p><p><i /> Scheduled inside preferred window</p></article></div>
+            </div>
+          </div>
+        </div>
+        <div className="signal-card"><span>QUALITY GATE</span><strong>Passed 22 checks</strong><small>Voice intact · claims verified</small></div>
+      </div>
     </section>
-    <section className="auth-panel">
-      <form onSubmit={submit} className="auth-form">
+
+    <section className="proof-strip"><span>Built for thoughtful operators</span><strong>VOICE-FIRST</strong><strong>FACT-GROUNDED</strong><strong>RATE-AWARE</strong><strong>AUDITABLE</strong></section>
+
+    <section className="landing-section problem-section">
+      <p className="eyebrow">THE PROBLEM</p>
+      <div className="section-split"><h2>You shouldn’t have to choose between <em>visible</em> and authentic.</h2><div><p>Most LinkedIn tools optimize for volume. They recycle formats, invent confidence, and leave you cleaning up the tone.</p><p>Cadence is built around a different constraint: every post should still feel safe to put your name on.</p></div></div>
+    </section>
+
+    <section className="landing-section" id="how">
+      <div className="section-heading"><div><p className="eyebrow">HOW IT WORKS</p><h2>A publishing system with <em>judgment</em>.</h2></div><p>From raw expertise to a well-timed post, every stage has a purpose and a record.</p></div>
+      <div className="feature-grid">
+        <article><span>01</span><h3>Learns your real voice</h3><p>Calibrates sentence rhythm, openers, vocabulary, structure, and line-break habits from your strongest posts.</p></article>
+        <article><span>02</span><h3>Challenges the draft</h3><p>Runs 22 quality detectors, checks factual claims, and kills drafts that sound generic, inflated, or ungrounded.</p></article>
+        <article><span>03</span><h3>Finds the right moment</h3><p>Balances content pillars, blocks repetitive structures, and schedules inside your preferred publishing windows.</p></article>
+        <article><span>04</span><h3>Shows every decision</h3><p>Keeps an operator-readable ledger of what passed, what failed, what published, and why.</p></article>
+      </div>
+    </section>
+
+    <section className="safety-section" id="safety">
+      <div><p className="eyebrow">CONTROL WITHOUT MICROMANAGEMENT</p><h2>Autonomy needs<br /><em>brakes.</em></h2><p>Cadence is cautious by construction. It observes before publishing, respects hard pacing limits, protects API budgets, and stops outbound writes the moment something looks wrong.</p><a href="#access" className="text-link">See inside the control room →</a></div>
+      <div className="safety-stack"><SafetyRow number="01" title="Seven-day observation period" text="The full pipeline runs while live publishing stays locked." /><SafetyRow number="02" title="Hard publishing limits" text="Daily and weekly caps plus a four-hour minimum gap prevent bursts." /><SafetyRow number="03" title="Immediate kill switch" text="One control halts every outbound write before the next API call." /><SafetyRow number="04" title="Encrypted credentials" text="Provider secrets stay server-side and LinkedIn tokens are encrypted at rest." /></div>
+    </section>
+
+    <section className="access-section" id="access">
+      <div className="access-copy"><p className="eyebrow">FOUNDER ACCESS</p><h2>Put your LinkedIn on a <em>better rhythm.</em></h2><p>Cadence is currently opening to a small group of operators. Create your private control room now; plans and team access can grow with the product later.</p><div className="access-points"><span>✓ Personal LinkedIn profile</span><span>✓ Voice and strategy calibration</span><span>✓ Approval queue or autonomous mode</span><span>✓ Full decision ledger</span></div></div>
+      <form onSubmit={submit} className="auth-form landing-auth">
         <span className="step-chip">PRIVATE CONTROL ROOM</span>
-        <h2>{sent ? 'Check your inbox' : 'Sign in to Cadence'}</h2>
-        <p>{sent ? `We sent a secure sign-in link to ${email}.` : 'Use the email attached to your Supabase account.'}</p>
-        {!sent && <><label>Email address<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" /></label><button className="button primary" type="submit">Send secure link <Arrow /></button></>}
+        <h2>{sent ? 'Check your inbox' : 'Create your workspace'}</h2>
+        <p>{sent ? `A secure sign-in link is on its way to ${email}.` : 'Enter your email to sign in or create your Cadence workspace.'}</p>
+        {!sent && <><label>Email address<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" /></label><button className="button primary" type="submit">Continue with email <Arrow /></button><small className="form-note">Passwordless sign-in. Your publishing controls stay private.</small></>}
         {error && <p className="error">{error}</p>}
       </form>
     </section>
+
+    <footer className="landing-footer"><div className="wordmark"><Mark /> CADENCE</div><p>A quiet operating system for a thoughtful LinkedIn presence.</p><span>© {new Date().getFullYear()} Cadence</span></footer>
   </main>;
 }
+
+function SafetyRow({ number, title, text }: { number: string; title: string; text: string }) { return <article><span>{number}</span><div><h3>{title}</h3><p>{text}</p></div></article>; }
 
 function ControlRoom({ supabase, session, apiUrl }: { supabase: SupabaseClient; session: Session; apiUrl: string }) {
   const api = useMemo(() => new Api(apiUrl, async () => {
