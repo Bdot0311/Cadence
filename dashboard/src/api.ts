@@ -45,6 +45,7 @@ export class Api {
   saveConfig(config: Record<string, unknown>): Promise<unknown> { return this.request('/api/config', { method: 'PUT', body: JSON.stringify(config) }); }
   killSwitch(accountId: string, engaged: boolean): Promise<unknown> { return this.request('/api/kill-switch', { method: 'POST', body: JSON.stringify({ accountId, engaged }) }); }
   createPost(input: { accountId: string; pillarId: string | null; body: string; scheduledAt: string | null }): Promise<unknown> { return this.request('/api/posts', { method: 'POST', body: JSON.stringify(input) }); }
+  setPostState(postId: string, state: 'approved' | 'scheduled' | 'killed'): Promise<unknown> { return this.request(`/api/posts/${postId}/state`, { method: 'PATCH', body: JSON.stringify({ state }) }); }
 
   private async request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const response = await fetch(`${this.base}${path}`, {

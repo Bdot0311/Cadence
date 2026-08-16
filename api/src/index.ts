@@ -283,7 +283,7 @@ async function dashboardPayload(ownerId: string): Promise<Record<string, unknown
     performance: performance.data ?? [],
     stats: {
       published: postRows.filter((p) => p.state === 'published').length,
-      queued: postRows.filter((p) => ['approved', 'scheduled'].includes(p.state)).length,
+      queued: postRows.filter((p) => ['draft', 'approved', 'scheduled'].includes(p.state)).length,
       killed: postRows.filter((p) => p.state === 'killed').length,
       failed: postRows.filter((p) => p.state === 'failed').length,
       writesToday: writeRows.filter((r) => r.is_write).length,
