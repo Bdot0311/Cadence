@@ -20,11 +20,19 @@ export function App({ supabase, apiUrl }: { supabase: SupabaseClient; apiUrl: st
 function SignIn({ supabase }: { supabase: SupabaseClient }) {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
+  const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   async function submit(event: FormEvent) {
-    event.preventDefault(); setError('');
-    const { error: authError } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
-    if (authError) setError(authError.message); else setSent(true);
+    event.preventDefault();
+    if (sending) return;
+    setSending(true); setError('');
+    try {
+      const { error: authError } = await supabase.auth.signInWithOtp({ email, options: { emailRedirectTo: window.location.origin } });
+      if (authError) {
+        const rateLimited = authError.code === 'over_email_send_rate_limit' || /rate limit/i.test(authError.message);
+        setError(rateLimited ? 'Email limit reached. Use the newest link already in your inbox, or try again after the hourly limit resets.' : authError.message);
+      } else setSent(true);
+    } finally { setSending(false); }
   }
   return <main className="landing">
     <nav className="landing-nav" aria-label="Main navigation">
@@ -85,7 +93,7 @@ function SignIn({ supabase }: { supabase: SupabaseClient }) {
         <span className="step-chip">PRIVATE CONTROL ROOM</span>
         <h2>{sent ? 'Check your inbox' : 'Create your workspace'}</h2>
         <p>{sent ? `A secure sign-in link is on its way to ${email}.` : 'Enter your email to sign in or create your Cadence workspace.'}</p>
-        {!sent && <><label>Email address<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" /></label><button className="button primary" type="submit">Continue with email <Arrow /></button><small className="form-note">Passwordless sign-in. Your publishing controls stay private.</small></>}
+        {!sent && <><label>Email address<input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com" /></label><button className="button primary" type="submit" disabled={sending}>{sending ? 'Sending secure link…' : 'Continue with email'} {!sending && <Arrow />}</button><small className="form-note">Passwordless sign-in. Your publishing controls stay private.</small></>}
         {error && <p className="error">{error}</p>}
       </form>
     </section>
