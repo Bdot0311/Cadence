@@ -40,7 +40,14 @@ alter table accounts
 -- Publishing to a page and reading its engagement come from different apps, so
 -- the dashboard needs to know which capabilities are actually reachable for a
 -- given page rather than assuming one token covers both.
-create or replace view account_capabilities as
+--
+-- DROP then CREATE, not CREATE OR REPLACE. Replace cannot insert a column into
+-- the middle of an existing view's column list — Postgres reads that as
+-- renaming the column in that position and refuses with 42P16. The drop is
+-- inside the migration's transaction, so there is no window where the view is
+-- missing.
+drop view if exists account_capabilities;
+create view account_capabilities as
 select
   a.id as account_id,
   a.account_type,
