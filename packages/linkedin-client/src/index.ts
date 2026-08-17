@@ -90,3 +90,11 @@ export {
   CommentsResponse,
   ShareStatistics,
 } from './types.js';
+export {
+  AppRegistry,
+  AppNotConfiguredError,
+  LINKEDIN_APPS,
+  appIdForAccount,
+  appForScope,
+} from './apps.js';
+export type { LinkedInAppId, AppCredentials } from './apps.js';

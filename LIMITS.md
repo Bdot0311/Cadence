@@ -286,8 +286,17 @@ changes about what the agent can actually do until LinkedIn grants the scopes.
 | Engagement routing and timing | Built (`comment-policy.ts`, 20 tests) | No |
 | Engagement tables | Migration `0004_engagement.sql` | Applied, empty |
 
-**Two conditions gate all of it**, both required, checked before any request is
-built:
+**It needs a second LinkedIn app.** Community Management API must be the ONLY
+product on its application — LinkedIn greys out the request button when any
+other product is provisioned. It cannot share an app with Share on LinkedIn, so
+holding both capabilities means two apps, two client ID/secret pairs, and two
+OAuth flows. `accounts.linkedin_app` records which app issued each token,
+because a refresh token can only be redeemed with the credentials of the app
+that issued it — using the wrong pair returns `invalid_grant`, which looks like
+an expired token rather than a config error.
+
+**Two further conditions gate all of it**, both required, checked before any
+request is built:
 
 1. `ORG_FEATURES_ENABLED=true`
 2. The account token actually carries the needed scope

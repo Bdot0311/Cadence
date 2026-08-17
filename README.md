@@ -78,11 +78,15 @@ Go to <https://www.linkedin.com/developers/apps> and create an app.
 | **Share on LinkedIn** | Grants `w_member_social` — publishing to your profile | Self-serve, instant |
 | **Sign In with LinkedIn using OpenID Connect** | Grants `openid profile email` — resolves your author URN | Self-serve, instant |
 
-Do **not** request Community Management API for v1. It gates capabilities this
-version doesn't use, and requesting it adds a review cycle for nothing. The
-justification text and screencast requirements for it are in
+**Do not request Community Management API on this app.** Not as a preference —
+LinkedIn requires that product to be the *only* one on its application, so
+requesting it here is impossible once Share on LinkedIn is provisioned, and
+requesting it *first* would lock you out of member publishing instead.
+
+Company pages and the engagement loop therefore live on a **second, separate
+LinkedIn app**. The code for them is already written and gated off; see
 [docs/community-management-application.md](docs/community-management-application.md)
-for when you want v2.
+for the two-app layout and the application pack.
 
 On the **Auth** tab, add your redirect URL:
 
