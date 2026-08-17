@@ -59,3 +59,23 @@ export type {
   RecentPost,
   ScoredCandidate,
 } from './selection.js';
+
+// --- v2: engagement loop (Community Management API) -------------------------
+export {
+  routeComment,
+  decideReply,
+  isWithinActiveHours,
+  nextActiveSlot,
+  localMinutes,
+  checkReplyLength,
+  REPLY_MAX_CHARS,
+  REPLY_DELAY_MIN_MINUTES,
+  REPLY_DELAY_MAX_MINUTES,
+} from './comment-policy.js';
+export type {
+  CommentClass,
+  CommentAction,
+  ActiveHours,
+  ThreadState,
+  ReplyDecision,
+} from './comment-policy.js';

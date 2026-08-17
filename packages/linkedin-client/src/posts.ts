@@ -1,34 +1,63 @@
 import { LinkedInError } from './errors.js';
 import type { LinkedInHttp } from './http.js';
 import {
+  ORG_SCOPES,
+  assertOrgFeaturesEnabled,
+  type OrgFeatureContext,
+} from './org-features.js';
+import {
   CreatePostRequest,
+  isOrganizationUrn,
+  type AuthorUrn,
   type CreatePostResult,
   ShareUrn,
   type ImageUrn,
-  type MemberUrn,
   type PostVisibility,
 } from './types.js';
 
 /**
- * Publishing to the founder's personal profile via POST /rest/posts.
+ * Publishing via POST /rest/posts.
  *
- * This class is the entire write surface of the package. There is no method
- * that takes an organization URN, no message method, and no comment method —
- * the v1 scope is enforced by what exists here, not by a runtime flag someone
- * can flip. See LIMITS.md.
+ * Authoring as a MEMBER needs only `w_member_social`, a self-serve Open
+ * Permission. Authoring as an ORGANIZATION needs `w_organization_social` from
+ * Community Management API, so it is gated — see the check in `create`.
+ *
+ * There is still no message method and no method for commenting on someone
+ * else's post, because those endpoints do not exist at any tier we can
+ * self-serve. See LIMITS.md.
  */
 export class Posts {
-  constructor(private readonly http: LinkedInHttp) {}
+  constructor(
+    private readonly http: LinkedInHttp,
+    /**
+     * Optional. Omit it and member publishing works exactly as before, while
+     * any attempt to author as an organization fails closed.
+     */
+    private readonly orgCtx: OrgFeatureContext = {
+      enabled: false,
+      grantedScopes: [],
+    },
+  ) {}
 
   async create(args: {
     accountId: string;
     accessToken: string;
-    author: MemberUrn;
+    author: AuthorUrn;
     commentary: string;
     visibility?: PostVisibility;
     media?: ImageUrn[];
     mediaTitle?: string;
   }): Promise<CreatePostResult> {
+    // Gate on the URN itself rather than on a caller-supplied flag. A page post
+    // cannot reach the network without the scope, however it was routed here.
+    if (isOrganizationUrn(args.author)) {
+      assertOrgFeaturesEnabled(
+        this.orgCtx,
+        'Publishing to a company page',
+        ORG_SCOPES.write,
+      );
+    }
+
     const input = CreatePostRequest.parse({
       author: args.author,
       commentary: args.commentary,
@@ -47,9 +76,9 @@ export class Posts {
         thirdPartyDistributionChannels: [],
       },
       lifecycleState: 'PUBLISHED',
-      // Whether other members may reply. Comments stay open; the agent can't
-      // read or reply to them in v1, but closing them would suppress the
-      // comment-gate CTA the content engine is built around.
+      // Whether other members may reshare. Comments stay open regardless —
+      // closing them would suppress the comment-gate CTA the content engine is
+      // built around.
       isReshareDisabledByAuthor: false,
     };
 

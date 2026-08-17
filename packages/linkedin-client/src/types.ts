@@ -10,14 +10,22 @@ import { z } from 'zod';
 
 // --- URNs -------------------------------------------------------------------
 
-/**
- * v1 authors as a member only. This regex is the enforcement point for
- * "no org writes" — an organization URN cannot be constructed through the
- * public surface of this package. See LIMITS.md.
- */
 export const MemberUrn = z
   .string()
   .regex(/^urn:li:person:[A-Za-z0-9_-]+$/, 'must be a urn:li:person URN');
+
+/**
+ * Organization URN. Writing as an org requires `w_organization_social`, which
+ * comes from Community Management API approval — so this type existing does
+ * NOT mean org publishing is live. The runtime gate is the granted scope plus
+ * the org-features flag; see `assertOrgFeaturesEnabled`.
+ */
+export const OrganizationUrn = z
+  .string()
+  .regex(/^urn:li:organization:[0-9]+$/, 'must be a urn:li:organization URN');
+
+/** Anything that can author a post. */
+export const AuthorUrn = z.union([MemberUrn, OrganizationUrn]);
 
 export const ShareUrn = z
   .string()
@@ -27,9 +35,24 @@ export const ImageUrn = z
   .string()
   .regex(/^urn:li:image:[A-Za-z0-9_-]+$/, 'must be an image URN');
 
+/** A comment on a post. Returned by socialActions, needed to reply. */
+export const CommentUrn = z
+  .string()
+  .regex(
+    /^urn:li:comment:\(urn:li:(share|ugcPost|activity):[0-9]+,[0-9]+\)$/,
+    'must be a urn:li:comment URN',
+  );
+
 export type MemberUrn = z.infer<typeof MemberUrn>;
+export type OrganizationUrn = z.infer<typeof OrganizationUrn>;
+export type AuthorUrn = z.infer<typeof AuthorUrn>;
 export type ShareUrn = z.infer<typeof ShareUrn>;
 export type ImageUrn = z.infer<typeof ImageUrn>;
+export type CommentUrn = z.infer<typeof CommentUrn>;
+
+export function isOrganizationUrn(urn: string): urn is OrganizationUrn {
+  return OrganizationUrn.safeParse(urn).success;
+}
 
 // --- OAuth ------------------------------------------------------------------
 
@@ -67,7 +90,7 @@ export type PostVisibility = z.infer<typeof PostVisibility>;
  * here. Everything this agent publishes is meant to be seen.
  */
 export const CreatePostRequest = z.object({
-  author: MemberUrn,
+  author: AuthorUrn,
   commentary: z.string().min(1).max(3000),
   visibility: PostVisibility.default('PUBLIC'),
   /** Image URNs from /rest/images, attached in order. */
@@ -150,3 +173,84 @@ export interface WriteGuard {
    */
   onRateLimited(accountId: string, quota: QuotaSnapshot): Promise<void>;
 }
+
+// --- Organizations (v2, Community Management API) ---------------------------
+
+/**
+ * GET /rest/organizationAcls?q=roleAssignee — the orgs this member administers.
+ *
+ * Requires `r_organization_social` (Community Management API). This is how the
+ * setup wizard discovers pages rather than asking the founder to paste URNs.
+ */
+export const OrganizationAcl = z.object({
+  elements: z
+    .array(
+      z.object({
+        organization: OrganizationUrn,
+        role: z.string(),
+        /** APPROVED | REQUESTED | REJECTED. Only APPROVED can publish. */
+        state: z.string(),
+      }),
+    )
+    .default([]),
+});
+export type OrganizationAcl = z.infer<typeof OrganizationAcl>;
+
+// --- Comments (v2, socialActions) -------------------------------------------
+
+/**
+ * One comment from GET /rest/socialActions/{shareUrn}/comments.
+ *
+ * `actor` may be a person or an organization. `parentComment` is present on
+ * replies, absent on top-level comments — the engagement loop uses that to
+ * avoid treating its own reply as a new inbound comment.
+ */
+export const Comment = z.object({
+  /** urn:li:comment:(urn:li:share:123,456) */
+  urn: CommentUrn,
+  actor: z.string(),
+  message: z.object({ text: z.string() }),
+  /** Epoch milliseconds. */
+  created: z.object({ time: z.number().int() }),
+  parentComment: CommentUrn.optional(),
+});
+export type Comment = z.infer<typeof Comment>;
+
+export const CommentsResponse = z.object({
+  elements: z.array(Comment).default([]),
+  paging: z
+    .object({ start: z.number().int().optional(), count: z.number().int().optional() })
+    .optional(),
+});
+export type CommentsResponse = z.infer<typeof CommentsResponse>;
+
+// --- Analytics (v2, Community Management API) -------------------------------
+
+/**
+ * GET /rest/organizationalEntityShareStatistics
+ *
+ * Every field optional: LinkedIn omits metrics rather than zeroing them when a
+ * post is too new or too low-volume to report. Storing a null is honest;
+ * coercing to 0 would poison the learning loop's averages.
+ */
+export const ShareStatistics = z.object({
+  elements: z
+    .array(
+      z.object({
+        share: ShareUrn.optional(),
+        totalShareStatistics: z
+          .object({
+            impressionCount: z.number().int().optional(),
+            uniqueImpressionsCount: z.number().int().optional(),
+            clickCount: z.number().int().optional(),
+            likeCount: z.number().int().optional(),
+            commentCount: z.number().int().optional(),
+            shareCount: z.number().int().optional(),
+            engagement: z.number().optional(),
+          })
+          .optional(),
+      }),
+    )
+    .default([]),
+});
+export type ShareStatistics = z.infer<typeof ShareStatistics>;
