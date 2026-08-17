@@ -66,3 +66,27 @@ export class LinkedInClient {
     this.media = new Media(this.http);
   }
 }
+
+// --- v2: Community Management API surface -----------------------------------
+// Everything below requires CMA approval and is inert until ORG_FEATURES_ENABLED
+// is on AND the token carries the scope. See org-features.ts and LIMITS.md.
+export {
+  ORG_SCOPES,
+  assertOrgFeaturesEnabled,
+  orgFeaturesAvailable,
+  OrgFeaturesDisabledError,
+} from './org-features.js';
+export type { OrgScope, OrgFeatureContext } from './org-features.js';
+export { SocialActions } from './social-actions.js';
+export { Organizations } from './organizations.js';
+export type { AdministeredOrg, PostMetrics } from './organizations.js';
+export {
+  OrganizationUrn,
+  AuthorUrn,
+  CommentUrn,
+  isOrganizationUrn,
+  OrganizationAcl,
+  Comment,
+  CommentsResponse,
+  ShareStatistics,
+} from './types.js';

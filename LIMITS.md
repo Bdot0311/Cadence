@@ -267,3 +267,58 @@ the model's judgment:
 | AI writing tells | Slop gate, same directory, max 3 loops then kill |
 | Kill switch | `AGENT_KILL_SWITCH` env var + dashboard button, checked every scheduler tick |
 | Anomaly halt | >20% publish failures in a rolling hour, or any 401/403 |
+
+---
+
+## v2 status — code built, scopes pending
+
+The Community Management API capabilities listed as deferred above now have
+**working code paths**, tested against fixtures. They are not live. Nothing
+changes about what the agent can actually do until LinkedIn grants the scopes.
+
+| Capability | Code | Live |
+|---|---|---|
+| Publish to company pages | Built (`Posts.create` accepts an org URN) | No |
+| Read comments on our posts | Built (`SocialActions.listComments`) | No |
+| Reply to comments | Built (`SocialActions.replyToComment`) | No |
+| Org discovery | Built (`Organizations.listAdministered`) | No |
+| Post analytics | Built (`Organizations.shareStatistics`) | No |
+| Engagement routing and timing | Built (`comment-policy.ts`, 20 tests) | No |
+| Engagement tables | Migration `0004_engagement.sql` | Applied, empty |
+
+**Two conditions gate all of it**, both required, checked before any request is
+built:
+
+1. `ORG_FEATURES_ENABLED=true`
+2. The account token actually carries the needed scope
+
+The second condition is the one that matters. A flag alone would let a config
+change start firing requests that come back 403, which trips the anomaly halt
+and stops personal-profile publishing that was working fine. Checking the
+granted scope turns that into a clear local error instead.
+
+Adding the product in the LinkedIn developer console does **not** upgrade an
+existing token. The account has to be reconnected so OAuth re-runs with the new
+scope. That is the most likely reason the gate stays shut after approval lands,
+so the error message says so directly.
+
+### Rules encoded in the engagement loop
+
+These are deterministic, not left to model judgment:
+
+- **The agent never argues.** Hostile comments are logged and left alone. There
+  is no configuration that turns this off, and a test asserts that both
+  objection-library states still produce silence.
+- **An objection with no library entry gets no reply.** Improvising a rebuttal
+  in public is the same failure as arguing.
+- **Never a second reply in a thread** unless the person asked a direct
+  follow-up after ours.
+- **Never a reply outside active hours.** A reply that lands overnight is pushed
+  to the next opening rather than dropped or sent at 4am.
+- **Replies are held 20 to 90 minutes.** Instant replies read as automation.
+
+### What is still impossible
+
+DMs remain out, for reading and sending both. That did not change and will not
+change without LinkedIn opening the Messages API at a self-serve tier. The
+WILL NOT list above is unchanged in full.
