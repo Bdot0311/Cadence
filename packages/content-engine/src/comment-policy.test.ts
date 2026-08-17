@@ -190,3 +190,111 @@ describe('reply length', () => {
     expect(checkReplyLength('x'.repeat(REPLY_MAX_CHARS)).ok).toBe(true);
   });
 });
+
+// --- regression: the gate must not contradict the CTA policy ----------------
+// Kept here rather than in a new file so it sits next to the other policy
+// invariants. See slop-gate.ts `exemptionsFor`.
+
+import { runSlopGate } from './slop-gate.js';
+import type { ModelClient } from './model.js';
+
+describe('slop gate exemptions', () => {
+  function capturingModel() {
+    let system = '';
+    const model = {
+      async text() {
+        return { value: '', inputTokens: 0, outputTokens: 0, refusal: null };
+      },
+      async structured(args: { system: string }) {
+        system = args.system;
+        return {
+          value: { violations: [] },
+          inputTokens: 1,
+          outputTokens: 1,
+          refusal: null,
+        };
+      },
+    } as unknown as ModelClient;
+    return {
+      model,
+      get system() {
+        return system;
+      },
+    };
+  }
+
+  // A draft with no layer-1 violations, so the critique pass actually runs.
+  const CLEAN = [
+    'Most cold email fails on the list, and no amount of copy rescues a bad list.',
+    '',
+    'Score the account on live intent signals first, then write to what the signal says.',
+    '',
+    'Comment "signal" and I will send you the scoring rubric.',
+  ].join('\n');
+
+  it('tells the critique pass the comment-gate CTA is required', async () => {
+    const h = capturingModel();
+    await runSlopGate({
+      draft: CLEAN,
+      model: h.model,
+      ctaPolicy: { mechanic: 'comment_gate', productNameInBody: false },
+    });
+
+    expect(h.system).toMatch(/EXEMPTIONS/);
+    expect(h.system).toMatch(/comment a specific word/);
+    expect(h.system).toMatch(/not a formulaic closer and not a sales-pitch pivot/);
+  });
+
+  it('exempts the mandated lead-data phrasing from invented-specificity', async () => {
+    const h = capturingModel();
+    await runSlopGate({ draft: CLEAN, model: h.model });
+    // The phrase must appear unbroken — wrapping it across lines is what this
+    // test originally caught.
+    expect(h.system).toMatch(
+      /"verified contacts from public records and licensed data partnerships"/,
+    );
+    expect(h.system).toMatch(/not invented specificity/i);
+  });
+
+  it('omits the CTA exemption when no comment gate is configured', async () => {
+    const h = capturingModel();
+    await runSlopGate({
+      draft: CLEAN,
+      model: h.model,
+      ctaPolicy: { mechanic: 'none', productNameInBody: true },
+    });
+    expect(h.system).not.toMatch(/comment a specific word/);
+  });
+
+  it('treats metaphorical-verb as advisory rather than blocking', async () => {
+    const model = {
+      async text() {
+        return { value: '', inputTokens: 0, outputTokens: 0, refusal: null };
+      },
+      async structured() {
+        return {
+          value: {
+            violations: [
+              {
+                code: 'metaphorical-verb',
+                message: 'x',
+                evidence: 'watching the inbox',
+              },
+            ],
+          },
+          inputTokens: 1,
+          outputTokens: 1,
+          refusal: null,
+        };
+      },
+    } as unknown as ModelClient;
+
+    const r = await runSlopGate({ draft: CLEAN, model });
+    // Reported, but does not kill the draft.
+    expect(r.violations.map((v) => v.code)).toContain('metaphorical-verb');
+    expect(r.violations.find((v) => v.code === 'metaphorical-verb')?.severity).toBe(
+      'clustering',
+    );
+    expect(r.pass).toBe(true);
+  });
+});

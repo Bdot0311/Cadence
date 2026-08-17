@@ -100,15 +100,27 @@ false-suspense: a transition that teases a revelation instead of naming it.
 self-answered-question: posing a question and answering it in the same beat.
 colon-setup: abstract noun, colon, payoff. "The reality:", "The takeaway:".
   Also the mid-sentence version: setup clause, colon, payoff.
-formulaic-opener: stock opening frames, and humblebrag announcement openers.
-formulaic-closer: announcing the conclusion instead of just making the last point.
+formulaic-opener: a STOCK FRAME — "In today's fast-paced world", "In an age
+  where", "At its core", "Welcome to", or a humblebrag announcement ("Thrilled
+  to share"). A sharp, specific first line is not a violation no matter how
+  declarative it is. Do not flag an opener merely for being confident.
+formulaic-closer: announcing the conclusion with a stock marker — "In
+  conclusion", "In summary", "Ultimately", "At the end of the day". A closing
+  line that simply makes the final point is not a violation.
 patronising-analogy: "think of it like", "it's like", "imagine if". Even one.
 manufactured-stakes: grandiose inflation ("reshapes everything") or
   phantom-future projection ("a year from now you'll wish"). Real stakes come
   from a present cost the reader already pays.
-invented-specificity: any number, date, percentage, or named moment not present
-  in the source material given to you. Also coining an abstract compound phrase
-  and using it as an established term.
+invented-specificity: a NUMBER, DATE, PERCENTAGE, DURATION, or NAMED ENTITY
+  (a company, person, product, or place) that does not appear in the source
+  material. Also coining an abstract compound phrase and using it as an
+  established term.
+  This is a narrow check. Flag it only when you can point to the specific
+  invented token. DO NOT flag ordinary concrete description that contains no
+  such token — "the rep spends the morning managing software" and "an AI SDR
+  watching the inbox" invent nothing and are not violations. Vividness is not
+  specificity. When the source is thin, the correct response is to flag
+  fabricated facts, not to flag every concrete noun.
 pedagogical-framing: teacher voice. "Let's unpack", "let's break this down".
 vague-authority: "research shows", "experts say", with no named source.
 swap-framing: "say goodbye to X, say hello to Y".
@@ -130,10 +142,56 @@ HOUSE RULE.
 sales-pitch-pivot: the post must not close by circling back to how early the
   company was, how it built this before anyone asked, or how the market is
   catching up. The value is the idea. Many posts should not name the product.
+  A configured call to action is NOT a sales-pitch pivot — see EXEMPTIONS.
 
 Judge only what is in the draft. Do not suggest additions. Do not reward the
 draft for what it avoids.
 `.trim();
+
+/**
+ * Exemptions the critique pass must be told about.
+ *
+ * Without this the gate is UNSATISFIABLE: the drafting step is instructed to
+ * end on a comment-gate CTA, and the critique pass then flags that exact line
+ * as `formulaic-closer` or `sales-pitch-pivot`. Every draft failed every loop
+ * and was killed. Two policies contradicting each other is not a quality bar,
+ * it is a bug.
+ *
+ * Same for the lead-data phrasing: `company-context` mandates the exact words
+ * "verified contacts from public records and licensed data partnerships", and
+ * the critique pass was flagging that mandated phrase as invented specificity.
+ */
+function exemptionsFor(cta?: { mechanic: string; productNameInBody: boolean }): string {
+  const lines: string[] = [
+    'EXEMPTIONS. These are required by policy. Never report them as violations.',
+    '',
+    // Keep each mandated phrase on ONE line. Wrapping it across lines makes the
+    // quoted wording harder for the model to match against the draft, and the
+    // whole point of these entries is exact-phrase recognition.
+    '- "verified contacts from public records and licensed data partnerships"',
+    '- "live intent signals"',
+    '  Both are mandated wording for the lead data source. Not invented specificity.',
+    '- Naming shipped product capabilities: ICP discovery, lead scoring, AI email generation, sequences, workflow builder, pipeline analytics, Gmail sync, the AI SDR agent.',
+    '  These are real and documented. Not invented.',
+  ];
+
+  if (cta?.mechanic === 'comment_gate') {
+    lines.push(
+      '- The closing call to action asking the reader to comment a specific word.',
+      '  This is the configured CTA mechanic and is REQUIRED in every post. It is',
+      '  not a formulaic closer and not a sales-pitch pivot. Do not flag it under',
+      '  any code, including manufactured-stakes or one-point-dilution.',
+    );
+  }
+  if (cta && !cta.productNameInBody) {
+    lines.push(
+      '- The post deliberately does not name the product. That is policy, not a',
+      '  gap to report.',
+    );
+  }
+
+  return lines.join('\n');
+}
 
 export interface SlopGateResult {
   pass: boolean;
@@ -148,6 +206,11 @@ export async function runSlopGate(args: {
   model: ModelClient;
   /** Source material the draft was written from, so invented specificity can be judged. */
   sourceContext?: string;
+  /**
+   * The configured CTA. Without it the critique pass flags the mandated
+   * comment-gate closer and the gate can never pass. See `exemptionsFor`.
+   */
+  ctaPolicy?: { mechanic: string; productNameInBody: boolean };
 }): Promise<SlopGateResult> {
   const deterministic = detectSlop(args.draft);
 
@@ -166,7 +229,7 @@ export async function runSlopGate(args: {
   const critique = await args.model.structured({
     schema: CritiqueResult,
     jsonSchema: CRITIQUE_JSON_SCHEMA as unknown as Record<string, unknown>,
-    system: CRITIQUE_SYSTEM,
+    system: `${CRITIQUE_SYSTEM}\n\n${exemptionsFor(args.ctaPolicy)}`,
     // Gate judgment is load-bearing. Run it at high effort regardless of what
     // drafting used.
     effort: 'high',
@@ -199,9 +262,16 @@ export async function runSlopGate(args: {
   const semantic: Violation[] = critique.value.violations.map((v) => ({
     code: v.code,
     // Clustering codes are advisory; everything else on this checklist blocks.
-    severity: v.code.startsWith('clustering-') || v.code === 'one-point-dilution'
-      ? 'clustering'
-      : 'zero-tolerance',
+    // `metaphorical-verb` is advisory, not blocking. In practice it fires on
+    // ordinary English ("watching the inbox", "feeding into sequences") where
+    // the verb is the plainest available word, and blocking on it made the
+    // gate unsatisfiable. Surface it; do not kill for it.
+    severity:
+      v.code.startsWith('clustering-') ||
+      v.code === 'one-point-dilution' ||
+      v.code === 'metaphorical-verb'
+        ? 'clustering'
+        : 'zero-tolerance',
     message: v.message,
     evidence: v.evidence,
   }));

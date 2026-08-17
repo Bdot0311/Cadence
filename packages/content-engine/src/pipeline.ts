@@ -231,6 +231,9 @@ export async function draftWithGates(args: {
       draft: lastDraft,
       model,
       sourceContext: req.sourceContext,
+      // Without this the critique pass flags the comment-gate CTA that the
+      // drafting prompt just required, and no draft can ever pass.
+      ctaPolicy: req.ctaPolicy,
     });
     if (slop.usage) {
       inputTokens += slop.usage.inputTokens;
