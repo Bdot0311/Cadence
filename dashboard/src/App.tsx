@@ -199,6 +199,14 @@ function Decisions({ data }: { data: DashboardData }) {
 function Setup({ account, api, refresh }: { account: Account | null; api: Api; refresh: () => Promise<void> }) {
   const activeVoice = account?.voice_profiles.find((voice) => voice.active);
   const activePillars = account?.content_pillars.filter((pillar) => pillar.active) ?? [];
+  const activeBeliefs = account?.founder_pov?.filter((b) => b.active !== false) ?? [];
+  const [beliefs, setBeliefs] = useState(
+    activeBeliefs.length
+      ? activeBeliefs
+          .map((b) => [b.label, b.belief, b.challenges ?? '', b.evidence ?? ''].join(' | '))
+          .join('\n')
+      : '',
+  );
   const [posts, setPosts] = useState(activeVoice?.source_posts?.join('\n\n---\n\n') ?? ''); const [pillars, setPillars] = useState(activePillars.length ? activePillars.map((p) => `${p.name} | ${p.description} | ${p.target_share}`).join('\n') : 'Operator lessons | Hard-won lessons from building and selling | 0.4\nSystems thinking | Frameworks that make complex work simpler | 0.35\nField notes | Specific observations from the week | 0.25');
   const [timezone, setTimezone] = useState(oneConfig(account)?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone); const [messageText, setMessageText] = useState(''); const [savingVoice, setSavingVoice] = useState(false);
   const detectedPosts = parseVoicePosts(posts);
@@ -211,14 +219,33 @@ function Setup({ account, api, refresh }: { account: Account | null; api: Api; r
     catch (e) { setMessageText(message(e)); }
     finally { setSavingVoice(false); }
   }
+  async function saveBeliefs() {
+    try {
+      const values = beliefs.split('\n').filter((l) => l.trim()).map((line) => {
+        const [label, belief, challenges, evidence] = line.split('|').map((v) => v.trim());
+        return {
+          label: label ?? '', belief: belief ?? '',
+          ...(challenges ? { challenges } : {}),
+          ...(evidence ? { evidence } : {}),
+        };
+      });
+      const r = await api.saveFounderPov(values, account?.id);
+      setMessageText(r.count === 0
+        ? 'Cleared. Founder POV posts will avoid asserting an opinion until a belief is on file.'
+        : `Saved ${r.count} belief${r.count === 1 ? '' : 's'}.`);
+      await refresh();
+    } catch (e) { setMessageText(message(e)); }
+  }
+
   async function savePillars() { try { const values = pillars.split('\n').filter(Boolean).map((line) => { const [name, description, share] = line.split('|').map((v) => v.trim()); return { name: name ?? '', description: description ?? '', targetShare: Number(share) }; }); await api.savePillars(values, account?.id); setMessageText('Content pillars saved.'); await refresh(); } catch (e) { setMessageText(message(e)); } }
   async function saveStrategy() { try { await api.saveConfig({ accountId: account?.id, timezone, windows: [1,2,3,4,5].map((day) => ({ day, start: '08:30', end: '11:30' })), minGapMinutes: 240, dailyCap: 1, weeklyCap: 5, jitterMinutes: 12, ctaPolicy: { mechanic: 'comment_gate', product_name_in_body: false }, blockedTopics: [], blockedClaims: [], autonomyMode: 'approval_queue' }); setMessageText('Strategy saved.'); await refresh(); } catch (e) { setMessageText(message(e)); } }
-  const completedSteps = [Boolean(account), Boolean(activeVoice), activePillars.length > 0, Boolean(oneConfig(account))].filter(Boolean).length;
-  return <section className="page"><div className="page-heading"><div><p className="eyebrow">CALIBRATION</p><h1>Make it sound like <em>you</em>.</h1><p>Complete these four steps, then review generated posts in the Queue.</p></div></div>{messageText && <div className="notice slim">{messageText}</div>}<div className="setup-guide"><div><strong>{completedSteps}/4 setup steps complete</strong><span>{completedSteps === 4 ? 'Setup is complete. Review automatic drafts in Queue.' : 'Work from top to bottom. A checkmark means the step is saved.'}</span></div><p><b>What runs automatically today:</b> ideation, drafting, pacing, publishing approved queue items, token checks, safety gates, and decision logging.</p></div><div className="setup-stack">
+  const completedSteps = [Boolean(account), Boolean(activeVoice), activePillars.length > 0, activeBeliefs.length >= 3, Boolean(oneConfig(account))].filter(Boolean).length;
+  return <section className="page"><div className="page-heading"><div><p className="eyebrow">CALIBRATION</p><h1>Make it sound like <em>you</em>.</h1><p>Complete these five steps, then review generated posts in the Queue.</p></div></div>{messageText && <div className="notice slim">{messageText}</div>}<div className="setup-guide"><div><strong>{completedSteps}/5 setup steps complete</strong><span>{completedSteps === 5 ? 'Setup is complete. Review automatic drafts in Queue.' : 'Work from top to bottom. A checkmark means the step is saved.'}</span></div><p><b>What runs automatically today:</b> ideation, drafting, pacing, publishing approved queue items, token checks, safety gates, and decision logging.</p></div><div className="setup-stack">
     <SetupCard number="01" title="LinkedIn connection" done={!!account && !linkedinRenewalNeeded} detail={account ? `${account.display_name} · connected until ${formatDate(account.token_expires_at)}. Cadence sign-ins do not disconnect it.` : 'Connect a personal profile with OpenID and w_member_social.'}>{account && !linkedinRenewalNeeded ? <button className="button secondary" disabled>Connected ✓</button> : <button className="button secondary" onClick={() => void connect()}>{account ? 'Renew LinkedIn connection' : 'Connect LinkedIn'} <Arrow /></button>}</SetupCard>
     <SetupCard number="02" title="Voice calibration" done={!!activeVoice} detail={activeVoice ? `Voice profile v${activeVoice.version} is active.` : `Paste 10–20 strong posts. ${detectedPosts.length} of 10 required posts detected.`}><textarea className="setup-textarea" value={posts} onChange={(e) => setPosts(e.target.value)} placeholder={'First full post…\n\n---\n\nSecond full post…'} /><small className={`detected-count ${detectedPosts.length >= 10 ? 'ready' : ''}`}>{detectedPosts.length >= 10 ? 'Ready to extract' : `Add ${10 - detectedPosts.length} more · separate posts with ---`}</small><button className="button secondary" disabled={!account || savingVoice} onClick={() => void saveVoice()}>{savingVoice ? 'Extracting…' : 'Extract voice profile'}</button></SetupCard>
     <SetupCard number="03" title="Content pillars" done={activePillars.length > 0} detail="One per line: name | description | target share. Shares must total 1.0."><textarea className="setup-textarea compact" value={pillars} onChange={(e) => setPillars(e.target.value)} /><button className="button secondary" disabled={!account} onClick={() => void savePillars()}>Save pillars</button></SetupCard>
-    <SetupCard number="04" title="Publishing strategy" done={!!oneConfig(account)} detail="Conservative defaults: weekday mornings, one post daily, five weekly, four-hour minimum gap."><label className="inline-field">Timezone<input value={timezone} onChange={(e) => setTimezone(e.target.value)} /></label><button className="button primary" disabled={!account} onClick={() => void saveStrategy()}>Save safe defaults</button></SetupCard>
+    <SetupCard number="04" title="Founder point of view" done={activeBeliefs.length >= 3} detail={activeBeliefs.length ? `${activeBeliefs.length} belief${activeBeliefs.length === 1 ? '' : 's'} on file. Founder POV is 20% of output.` : 'Empty. Founder-POV posts will not assert an opinion until you fill this in — the agent will not invent your beliefs. Aim for 3 to 5.'}><textarea className="setup-textarea" value={beliefs} onChange={(e) => setBeliefs(e.target.value)} placeholder={'Lists beat copy | Targeting decides the outcome, copy only decides the margin | Rewrite your subject lines | Three rebuilds of the same sequence\n\nOne per line: label | belief | what it pushes against | evidence'} /><small className="setup-hint">One per line: label | belief | what it argues against | evidence. The last two are optional but make the post land.</small><button className="button secondary" disabled={!account} onClick={() => void saveBeliefs()}>Save point of view</button></SetupCard>
+    <SetupCard number="05" title="Publishing strategy" done={!!oneConfig(account)} detail="Conservative defaults: weekday mornings, one post daily, five weekly, four-hour minimum gap."><label className="inline-field">Timezone<input value={timezone} onChange={(e) => setTimezone(e.target.value)} /></label><button className="button primary" disabled={!account} onClick={() => void saveStrategy()}>Save safe defaults</button></SetupCard>
   </div></section>;
 }
 

@@ -174,6 +174,31 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     return send(res, 200, { ok: true });
   }
 
+  if (req.method === 'PUT' && url.pathname === '/api/founder-pov') {
+    const input = FounderPovInput.parse(await body(req));
+    const accountId = await requireOwnedAccount(user.id, input.accountId);
+
+    // Deactivate then upsert, same shape as /api/pillars. Soft-deactivate
+    // rather than delete so a belief that gets removed and re-added keeps its
+    // history, and so drafting never sees a half-written set mid-save.
+    const { error: clearError } = await db.from('founder_pov')
+      .update({ active: false }).eq('account_id', accountId);
+    throwDb(clearError);
+
+    for (const b of input.beliefs) {
+      const { error } = await db.from('founder_pov').upsert({
+        account_id: accountId,
+        label: b.label,
+        belief: b.belief,
+        challenges: b.challenges ?? null,
+        evidence: b.evidence ?? null,
+        active: true,
+      }, { onConflict: 'account_id,label' });
+      throwDb(error);
+    }
+    return send(res, 200, { ok: true, count: input.beliefs.length });
+  }
+
   if (req.method === 'PUT' && url.pathname === '/api/config') {
     const input = ConfigInput.parse(await body(req));
     const accountId = await requireOwnedAccount(user.id, input.accountId);
@@ -273,7 +298,7 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
 async function dashboardPayload(ownerId: string): Promise<Record<string, unknown>> {
   const { data: accounts, error } = await db.from('accounts')
-    .select('id,urn,display_name,active,paused_until,pause_reason,token_expires_at,refresh_expires_at,created_at,agent_config(*),content_pillars(*),voice_profiles(id,version,profile,source_posts,active,created_at)')
+    .select('id,urn,display_name,active,paused_until,pause_reason,token_expires_at,refresh_expires_at,created_at,agent_config(*),content_pillars(*),voice_profiles(id,version,profile,source_posts,active,created_at),founder_pov(id,label,belief,challenges,evidence,active,created_at)')
     .eq('owner_id', ownerId).order('created_at', { ascending: true });
   throwDb(error);
   const ids = (accounts ?? []).map((account) => account.id);
@@ -312,6 +337,17 @@ const CredentialsInput = z.object({
 const PillarsInput = z.object({
   accountId: z.string().uuid().optional(),
   pillars: z.array(z.object({ name: z.string().min(1).max(80), description: z.string().min(1).max(500), targetShare: z.number().min(0).max(1) })).min(1).max(10),
+});
+const FounderPovInput = z.object({
+  accountId: z.string().uuid().optional(),
+  // Max 5 mirrors the audit's "3-5 strong beliefs". More than a handful stops
+  // being a point of view and becomes a topic list.
+  beliefs: z.array(z.object({
+    label: z.string().min(1).max(80),
+    belief: z.string().min(1).max(600),
+    challenges: z.string().max(400).optional(),
+    evidence: z.string().max(600).optional(),
+  })).max(5),
 });
 const ConfigInput = z.object({
   accountId: z.string().uuid().optional(),

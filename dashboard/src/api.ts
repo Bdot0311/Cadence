@@ -11,6 +11,7 @@ export interface Account {
   refresh_expires_at: string | null; created_at: string;
   agent_config: Config | Config[] | null;
   content_pillars: Pillar[];
+  founder_pov: Belief[];
   voice_profiles: Array<{ id: string; version: number; active: boolean; profile: Record<string, unknown>; source_posts: string[] }>;
 }
 export interface Config {
@@ -18,7 +19,11 @@ export interface Config {
   dry_run_until: string; kill_switch_engaged: boolean; halt_reason: string | null;
   blocked_topics: string[]; blocked_claims: string[]; cta_policy: Record<string, unknown>;
 }
-export interface Pillar { id: string; name: string; description: string; target_share: number; active: boolean }
+export interface Belief {
+  id?: string; label: string; belief: string;
+  challenges: string | null; evidence: string | null; active?: boolean;
+}
+export interface Pillar { id: string; name: string; description: string; target_share: number; active: boolean; kind?: string; cta_mechanic?: string | null }
 export interface Post {
   id: string; account_id: string; body: string; state: string; scheduled_at: string | null;
   published_at: string | null; kill_reason: string | null; failure_reason: string | null;
@@ -42,6 +47,9 @@ export class Api {
   startLinkedIn(): Promise<{ url: string }> { return this.request('/auth/linkedin/start', { method: 'POST' }); }
   saveVoice(posts: string[], accountId?: string): Promise<unknown> { return this.request('/api/voice-profile', { method: 'POST', body: JSON.stringify({ posts, accountId }) }); }
   savePillars(pillars: Array<{ name: string; description: string; targetShare: number }>, accountId?: string): Promise<unknown> { return this.request('/api/pillars', { method: 'PUT', body: JSON.stringify({ pillars, accountId }) }); }
+  saveFounderPov(beliefs: Array<{ label: string; belief: string; challenges?: string; evidence?: string }>, accountId?: string): Promise<{ ok: boolean; count: number }> {
+    return this.request('/api/founder-pov', { method: 'PUT', body: JSON.stringify({ beliefs, accountId }) });
+  }
   saveConfig(config: Record<string, unknown>): Promise<unknown> { return this.request('/api/config', { method: 'PUT', body: JSON.stringify(config) }); }
   killSwitch(accountId: string, engaged: boolean): Promise<unknown> { return this.request('/api/kill-switch', { method: 'POST', body: JSON.stringify({ accountId, engaged }) }); }
   createPost(input: { accountId: string; pillarId: string | null; body: string; scheduledAt: string | null }): Promise<unknown> { return this.request('/api/posts', { method: 'POST', body: JSON.stringify(input) }); }
