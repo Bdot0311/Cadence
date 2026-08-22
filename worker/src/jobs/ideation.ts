@@ -63,7 +63,8 @@ export async function runIdeation(args: {
   const { data: accounts, error } = await args.db.from('accounts').select([
     'id,display_name,active',
     'agent_config(autonomy_mode,cta_policy,blocked_topics,blocked_claims,kill_switch_engaged)',
-    'content_pillars(id,name,description,target_share,active)',
+    'content_pillars(id,name,description,target_share,active,kind,cta_mechanic)',
+    'founder_pov(label,belief,challenges,evidence,active)',
     'voice_profiles(id,profile,source_posts,active,version)',
   ].join(',')).eq('active', true);
   throwIf(error);
@@ -144,6 +145,17 @@ export async function runIdeation(args: {
     }));
     const selected = selectCandidates({ candidates: ideas, pillars: pillarInputs, recent, now: args.now, take: needed }).selected;
 
+    // Beliefs are read, never generated. An empty list is normal and the
+    // drafting prompt degrades safely rather than inventing a point of view.
+    const beliefsOnFile = ((row as any).founder_pov ?? [])
+      .filter((b: any) => b.active === true)
+      .map((b: any) => ({
+        label: String(b.label),
+        belief: String(b.belief),
+        challenges: b.challenges ?? null,
+        evidence: b.evidence ?? null,
+      }));
+
     for (const pick of selected) {
       const rawIdea = cleanIdeas.find((idea) => idea.angle === pick.candidate.angle && idea.pillarId === pick.candidate.pillarId);
       const pillar = pillars.find((candidate: any) => candidate.id === pick.candidate.pillarId);
@@ -156,7 +168,15 @@ export async function runIdeation(args: {
           pillarName: pillar.name,
           pillarDescription: pillar.description,
           voiceProfile: toVoiceProfile(voice.profile),
-          ctaPolicy: toCtaPolicy(config?.['cta_policy']),
+          // Per-pillar CTA overrides the global policy. Founder pillars close on
+          // discussion; a thought-leadership post that ends on a signup ask is
+          // the exact pattern the Aug 2026 audit flagged.
+          pillarKind: pillar.kind === 'founder' ? 'founder' : 'product',
+          ctaPolicy: toCtaPolicy(config?.['cta_policy'], pillar.cta_mechanic),
+          ...(typeof config?.['primary_audience'] === 'string'
+            ? { primaryAudience: config['primary_audience'] as string }
+            : {}),
+          beliefs: beliefsOnFile,
           blockedTopics: stringArray(config?.['blocked_topics']),
           blockedClaims: stringArray(config?.['blocked_claims']),
           sourceContext: `${groundedPosts.join('\n\n---\n\n')}\n\n--- ALLOWED PRODUCT FACTS ---\n${PRODUCT_FACTS_PROMPT}`,
@@ -234,10 +254,16 @@ function toVoiceProfile(value: unknown): VoiceProfile {
   };
 }
 
-function toCtaPolicy(value: unknown): CtaPolicy {
+function toCtaPolicy(value: unknown, pillarOverride?: unknown): CtaPolicy {
   const policy = object(value);
+  const mechanic =
+    typeof pillarOverride === 'string' && pillarOverride
+      ? pillarOverride
+      : typeof policy['mechanic'] === 'string'
+        ? policy['mechanic']
+        : 'none';
   return {
-    mechanic: typeof policy['mechanic'] === 'string' ? policy['mechanic'] : 'none',
+    mechanic,
     productNameInBody: policy['product_name_in_body'] === true,
     destination: typeof policy['destination'] === 'string' ? policy['destination'] : 'none',
   };

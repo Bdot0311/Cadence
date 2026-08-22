@@ -30,16 +30,42 @@ export interface CtaPolicy {
   destination: string;
 }
 
+/** A belief on file, from the founder_pov table. Never invented. */
+export interface FounderBelief {
+  label: string;
+  belief: string;
+  challenges?: string | null;
+  evidence?: string | null;
+}
+
+export type PillarKind = 'founder' | 'product';
+
 export interface DraftRequest {
   angle: string;
   pillarName: string;
   pillarDescription: string;
+  /**
+   * founder = the operator's thinking is the subject and the product is only
+   * evidence. product = the product or its domain is the subject.
+   *
+   * This is the lever the Aug 2026 audit turns on. Before it existed, every
+   * post was product-first because drafting had no other mode.
+   */
+  pillarKind: PillarKind;
   voiceProfile: VoiceProfile;
   ctaPolicy: CtaPolicy;
   blockedTopics: string[];
   blockedClaims: string[];
   /** Facts the post may draw on. Anything not here is invented specificity. */
   sourceContext: string;
+  /** Who the post is written for. Audit finding 4. */
+  primaryAudience?: string;
+  /**
+   * Beliefs on file. Empty is normal and must stay safe: a founder-POV post
+   * with no belief to argue is skipped, never improvised. An invented belief
+   * is not the founder's point of view.
+   */
+  beliefs?: FounderBelief[];
 }
 
 export type DraftOutcome =
@@ -82,6 +108,8 @@ function draftingSystem(req: DraftRequest): string {
     'LENGTH. Long-form is fine and often better. Do not pad to reach a length, and do',
     'not compress a real idea into fragments. Write until the point is made.',
     '',
+    positioningBlock(req),
+    '',
     PRODUCT_FACTS_PROMPT,
     '',
     'HARD FORMATTING RULES. These are checked mechanically after you write. A single',
@@ -109,6 +137,71 @@ function draftingSystem(req: DraftRequest): string {
     .join('\n');
 }
 
+/**
+ * Founder-vs-product positioning. This is the Aug 2026 audit's core fix.
+ *
+ * The audit's six findings all reduce to one thing: the content was product
+ * first. Cadence was causing that, not merely allowing it — drafting injected
+ * the product facts and a signup CTA into every post regardless of pillar, so
+ * "problem, lesson, product, CTA" was the only shape it could produce.
+ *
+ * For founder pillars the product becomes evidence rather than subject. The
+ * product facts stay in the prompt either way, because a founder post must
+ * still never contradict them.
+ */
+function positioningBlock(req: DraftRequest): string {
+  const audience =
+    req.primaryAudience ?? 'Founders, CEOs, and sales leaders at B2B companies';
+
+  if (req.pillarKind === 'product') {
+    return [
+      'POSITIONING. This is a product-domain post.',
+      `Written for: ${audience}.`,
+      'Lead with the reader\'s problem, not the capability. Name the product only',
+      'where the CTA policy allows it. Even here, the reader should finish with a',
+      'view about the problem, not a feature list.',
+    ].join('\n');
+  }
+
+  const lines = [
+    'POSITIONING. This is a FOUNDER post. The subject is how the founder thinks.',
+    `Written for: ${audience}. Peers carrying the same load, not evaluators of a tool.`,
+    '',
+    'Rules for this post:',
+    '- The product is EVIDENCE, never the subject. It may appear once, as proof',
+    '  that a belief survived contact with reality. If the post still works with',
+    '  the product removed, that is correct.',
+    '- Argue something. A post that only explains a best practice fails this',
+    '  pillar; the audit\'s finding was that the content teaches rather than',
+    '  takes a position.',
+    '- Ground it in something that actually happened: a decision, a cost, a call',
+    '  that went wrong. Do not invent the specifics.',
+    '- Do not pivot to how early the company was or how the market is catching up.',
+  ];
+
+  const beliefs = req.beliefs ?? [];
+  if (beliefs.length > 0) {
+    lines.push('', 'BELIEFS ON FILE. Argue from one of these. Do not invent a new one:');
+    for (const b of beliefs) {
+      lines.push(`- ${b.label}: ${b.belief}`);
+      if (b.challenges) lines.push(`  Pushes against: ${b.challenges}`);
+      if (b.evidence) lines.push(`  Evidence: ${b.evidence}`);
+    }
+  } else {
+    // Safe degradation. An invented belief is not the founder's point of view,
+    // and company-context forbids fabricated claims. Better to write from
+    // documented experience than to manufacture a position.
+    lines.push(
+      '',
+      'NO BELIEFS ARE ON FILE. Do not invent one and do not attribute an opinion',
+      'to the founder that is not in the source material. Write from what the',
+      'source actually supports, and keep the claim proportionate to it.',
+    );
+  }
+
+  return lines.join('\n');
+}
+
 function ctaInstruction(cta: CtaPolicy): string {
   const parts: string[] = ['CTA POLICY.'];
   if (cta.mechanic === 'comment_gate') {
@@ -116,6 +209,16 @@ function ctaInstruction(cta: CtaPolicy): string {
       'End with a comment-gate: ask the reader to comment a specific single word to',
       'receive the thing. Make the word short and easy to type. The gate must feel',
       'like a natural extension of the post, not a bolt-on.',
+    );
+  } else if (cta.mechanic === 'discussion') {
+    // Audit finding 2: "Most CTAs ask people to try OutReign instead of
+    // engaging with your perspective." A thought-leadership post that closes on
+    // a signup ask is a product post wearing a founder's voice.
+    parts.push(
+      'Close by inviting disagreement or a counter-example, in one line, on the',
+      'specific claim you just made. Do not ask for a signup, a download, a demo,',
+      'or a comment-gate keyword. Do not ask a generic "what do you think".',
+      'Name the thing you want pushback on.',
     );
   } else {
     parts.push('No call to action. End on the last substantive point.');

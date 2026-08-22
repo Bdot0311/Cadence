@@ -64,6 +64,7 @@ function request(overrides: Partial<DraftRequest> = {}): DraftRequest {
     angle: 'Why list quality beats copy quality in outbound',
     pillarName: 'Outbound craft',
     pillarDescription: 'How outbound actually works, from someone doing it',
+    pillarKind: 'product' as const,
     voiceProfile: voice,
     ctaPolicy: cta,
     blockedTopics: [],
@@ -181,5 +182,81 @@ describe('structureHash', () => {
     const a = 'Why does outbound fail?\n\nBecause the list is wrong.';
     const b = 'Outbound fails a lot.\n\nBecause the list is wrong.';
     expect(structureHash(a)).not.toBe(structureHash(b));
+  });
+});
+
+// --- founder vs product positioning (Aug 2026 LinkedIn audit) ---------------
+
+describe('positioning', () => {
+  function capture(overrides: Partial<DraftRequest>) {
+    let system = '';
+    const model = {
+      async text(a: { system: string }) {
+        system = a.system;
+        return { value: CLEAN_DRAFT, inputTokens: 1, outputTokens: 1, refusal: null };
+      },
+      async structured() {
+        return { value: { violations: [] }, inputTokens: 1, outputTokens: 1, refusal: null };
+      },
+    } as unknown as ModelClient;
+    return draftWithGates({ request: request(overrides), model }).then(() => system);
+  }
+
+  it('makes the product evidence rather than subject on founder pillars', async () => {
+    const s = await capture({ pillarKind: 'founder' });
+    expect(s).toMatch(/FOUNDER post/);
+    expect(s).toMatch(/product is EVIDENCE, never the subject/);
+    expect(s).toMatch(/still works with\s+the product removed/);
+  });
+
+  it('keeps product pillars product-led', async () => {
+    const s = await capture({ pillarKind: 'product' });
+    expect(s).toMatch(/product-domain post/);
+    expect(s).not.toMatch(/product is EVIDENCE/);
+  });
+
+  it('still injects product facts on founder posts, so they cannot contradict them', async () => {
+    const s = await capture({ pillarKind: 'founder' });
+    expect(s).toMatch(/EMAIL OUTBOUND ONLY/);
+  });
+
+  it('targets the audience the audit named', async () => {
+    const s = await capture({
+      pillarKind: 'founder',
+      primaryAudience: 'Founders, CEOs, and sales leaders at B2B companies',
+    });
+    expect(s).toMatch(/Founders, CEOs, and sales leaders/);
+  });
+
+  it('argues from a belief on file', async () => {
+    const s = await capture({
+      pillarKind: 'founder',
+      beliefs: [
+        { label: 'Lists beat copy', belief: 'Targeting decides outcomes, copy only decides margin.', challenges: 'Rewrite your subject lines', evidence: 'Three rebuilds of the same sequence' },
+      ],
+    });
+    expect(s).toMatch(/BELIEFS ON FILE/);
+    expect(s).toMatch(/Targeting decides outcomes/);
+    expect(s).toMatch(/Pushes against: Rewrite your subject lines/);
+  });
+
+  /**
+   * The safety property. An invented belief is not the founder's point of view,
+   * and company-context forbids fabricated claims.
+   */
+  it('refuses to invent a belief when none are on file', async () => {
+    const s = await capture({ pillarKind: 'founder', beliefs: [] });
+    expect(s).toMatch(/NO BELIEFS ARE ON FILE/);
+    expect(s).toMatch(/Do not invent one/);
+    expect(s).not.toMatch(/BELIEFS ON FILE\./);
+  });
+
+  it('closes founder posts on discussion, not a signup ask', async () => {
+    const s = await capture({
+      pillarKind: 'founder',
+      ctaPolicy: { mechanic: 'discussion', productNameInBody: false, destination: 'none' },
+    });
+    expect(s).toMatch(/inviting disagreement or a counter-example/);
+    expect(s).toMatch(/Do not ask for a signup/);
   });
 });
