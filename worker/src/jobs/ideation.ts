@@ -55,13 +55,13 @@ export interface IdeationResult {
 
 export async function runIdeation(args: {
   db: SupabaseClient;
-  model: ModelClient;
+  modelFor(ownerId: string): Promise<ModelClient | null>;
   now: Date;
   queueTarget: number;
 }): Promise<IdeationResult> {
   const result: IdeationResult = { accounts: 0, generated: 0, killed: 0, skipped: 0, costUsd: 0 };
   const { data: accounts, error } = await args.db.from('accounts').select([
-    'id,display_name,active',
+    'id,owner_id,display_name,active',
     'agent_config(autonomy_mode,cta_policy,blocked_topics,blocked_claims,kill_switch_engaged)',
     'content_pillars(id,name,description,target_share,active,kind,cta_mechanic)',
     'founder_pov(label,belief,challenges,evidence,active)',
@@ -73,6 +73,12 @@ export async function runIdeation(args: {
   for (const row of accountRows) {
     result.accounts++;
     const config = first(row.agent_config) as Record<string, unknown> | null;
+    // The owner's own Anthropic key. Null means unconfigured: skip rather than
+    // bill another user for this account's drafting.
+    const ownerId = (row as { owner_id?: string | null }).owner_id ?? null;
+    const model = ownerId ? await args.modelFor(ownerId) : null;
+    if (!model) { result.skipped++; continue; }
+
     const pillars = (row.content_pillars ?? []).filter((pillar: any) => pillar.active === true);
     const voice = (row.voice_profiles ?? []).find((profile: any) => profile.active === true);
     if (config?.['kill_switch_engaged'] === true || !voice || pillars.length === 0) {
@@ -99,7 +105,7 @@ export async function runIdeation(args: {
 
     const pillarInputs: Pillar[] = pillars.map((pillar: any) => ({ id: pillar.id, name: pillar.name, targetShare: Number(pillar.target_share) }));
     const recent = await recentPosts(args.db, row.id, args.now);
-    const ideaCall = await args.model.structured({
+    const ideaCall = await model.structured({
       schema: Ideas,
       jsonSchema: IDEAS_JSON_SCHEMA as unknown as Record<string, unknown>,
       effort: 'medium',
@@ -162,7 +168,7 @@ export async function runIdeation(args: {
       if (!rawIdea || !pillar) continue;
       const groundedPosts = rawIdea.sourcePostIndexes.flatMap((index) => sourcePosts[index - 1] ? [sourcePosts[index - 1] as string] : []);
       const draft = await draftWithGates({
-        model: args.model,
+        model,
         request: {
           angle: pick.candidate.angle,
           pillarName: pillar.name,

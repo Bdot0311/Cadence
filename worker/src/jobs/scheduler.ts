@@ -26,6 +26,8 @@ export interface DuePost {
 
 export interface SchedulerAccount {
   id: string;
+  /** Whose credentials this account runs on. Null means unclaimed; skip it. */
+  ownerId: string | null;
   urn: string;
   accessToken: string;
   schedule: ScheduleConfig;
@@ -48,7 +50,15 @@ export interface SchedulerDeps {
   duePosts(accountId: string, now: Date): Promise<DuePost[]>;
   publishedPosts(accountId: string): Promise<Array<{ publishedAt: Date }>>;
 
-  posts: Posts;
+  /**
+   * Per-account client factory, not a shared instance.
+   *
+   * Each account's owner brings their own LinkedIn app credentials, so a single
+   * boot-time client would publish every account through whichever app the
+   * process happened to start with. Returning null skips the account — an
+   * owner with missing credentials must not run on someone else's keys.
+   */
+  postsFor(account: SchedulerAccount): Promise<Posts | null>;
 
   markPublished(postId: string, urn: string, at: Date): Promise<void>;
   markFailed(postId: string, reason: string): Promise<void>;
@@ -178,7 +188,17 @@ export async function runSchedulerTick(args: {
       }
 
       try {
-        const result = await deps.posts.create({
+        const posts = await deps.postsFor(account);
+        if (!posts) {
+          skipped++;
+          await deps.log({
+            accountId: account.id, postId: post.id, stage: 'publish', level: 'warn',
+            decision: 'skipped', rationale:
+              'Owner has no usable LinkedIn credentials. Skipped rather than published through another account\'s app.',
+          });
+          break;
+        }
+        const result = await posts.create({
           accountId: account.id,
           accessToken: account.accessToken,
           author: account.urn,

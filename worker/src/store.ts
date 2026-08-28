@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { LedgerEntry, TokenSet } from '@agent/linkedin-client';
 import type { GuardStore } from './lib/guard.js';
+import type { StoredOwnerCredentials } from './lib/credentials.js';
 import type {
   DuePost,
   SchedulerAccount,
@@ -114,7 +115,7 @@ export class SupabaseRuntimeStore implements GuardStore {
 
   async activeAccounts(): Promise<SchedulerAccount[]> {
     const { data, error } = await this.db.from('accounts')
-      .select('id,urn,paused_until,agent_config(timezone,schedule)')
+      .select('id,owner_id,urn,paused_until,agent_config(timezone,schedule)')
       .eq('active', true);
     throwIf(error);
     return Promise.all((data ?? []).map(async (row) => {
@@ -122,6 +123,7 @@ export class SupabaseRuntimeStore implements GuardStore {
       const relation = firstRelation(row.agent_config) as JsonObject | null;
       return {
         id: row.id,
+        ownerId: (row as { owner_id?: string | null }).owner_id ?? null,
         urn: row.urn,
         accessToken: tokens.accessToken,
         schedule: parseSchedule(relation?.['timezone'], relation?.['schedule']),
@@ -225,7 +227,7 @@ export class SupabaseRuntimeStore implements GuardStore {
     throwIf(error);
   }
 
-  schedulerDeps(posts: SchedulerDeps['posts'], config: {
+  schedulerDeps(postsFor: SchedulerDeps['postsFor'], config: {
     envKillSwitch: boolean; failureThreshold: number;
   }): SchedulerDeps {
     return {
@@ -236,12 +238,44 @@ export class SupabaseRuntimeStore implements GuardStore {
       activeAccounts: () => this.activeAccounts(),
       duePosts: (id, now) => this.duePosts(id, now),
       publishedPosts: (id) => this.publishedPosts(id),
-      posts,
+      postsFor,
       markPublished: (id, urn, at) => this.markPublished(id, urn, at),
       markFailed: (id, reason) => this.markFailed(id, reason),
       reschedule: (id, to, reason) => this.reschedule(id, to, reason),
       log: (entry) => this.log(entry),
     };
+  }
+
+  /**
+   * Decrypted credentials for one owner, via the service-role-only RPC. The
+   * encryption key never leaves Postgres; this returns plaintext into the
+   * worker process and nowhere else.
+   */
+  async credentialsForOwner(ownerId: string): Promise<StoredOwnerCredentials | null> {
+    const { data, error } = await this.db.rpc('get_user_credentials', { p_owner: ownerId });
+    throwIf(error);
+    const row = Array.isArray(data) ? data[0] : null;
+    if (!row) return null;
+    return {
+      anthropicApiKey: row.anthropic_api_key ?? null,
+      anthropicModel: row.anthropic_model ?? null,
+      anthropicEffort: row.anthropic_effort ?? null,
+      linkedinClientId: row.linkedin_client_id ?? null,
+      linkedinClientSecret: row.linkedin_client_secret ?? null,
+    };
+  }
+
+  /**
+   * Which owner a refresh token belongs to, so the refresh runs on the app that
+   * issued it. Matching on the encrypted column keeps the plaintext out of the
+   * query and out of any statement log.
+   */
+  async ownerForRefreshToken(refreshToken: string): Promise<string | null> {
+    const { data, error } = await this.db.rpc('owner_for_refresh_token', {
+      p_token: refreshToken,
+    });
+    throwIf(error);
+    return (typeof data === 'string' ? data : null) ?? null;
   }
 
   refreshDeps(oauth: RefreshDeps['oauth'], alert: RefreshDeps['alert']): RefreshDeps {

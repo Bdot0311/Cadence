@@ -107,51 +107,40 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
 
   if (req.method === 'PUT' && url.pathname === '/api/settings/credentials') {
     const input = CredentialsInput.parse(await body(req));
-    const tokenEncryptionKey = env.TOKEN_ENCRYPTION_KEY || randomBytes(32).toString('base64');
-    await writeEnvFile(envFilePath, {
-      LINKEDIN_CLIENT_ID: input.linkedinClientId,
-      LINKEDIN_CLIENT_SECRET: input.linkedinClientSecret,
-      ANTHROPIC_API_KEY: input.anthropicApiKey,
-      TOKEN_ENCRYPTION_KEY: tokenEncryptionKey,
-      OAUTH_STATE_SECRET: env.OAUTH_STATE_SECRET || oauthStateSecret,
-      LINKEDIN_REDIRECT_URI: `${env.API_PUBLIC_URL}/auth/linkedin/callback`,
-      LINKEDIN_API_VERSION: env.LINKEDIN_API_VERSION,
-      LINKEDIN_SCOPES: env.LINKEDIN_SCOPES,
-      ANTHROPIC_MODEL: process.env.ANTHROPIC_MODEL || 'claude-sonnet-5',
-      ANTHROPIC_EFFORT: process.env.ANTHROPIC_EFFORT || 'high',
-      API_PUBLIC_URL: env.API_PUBLIC_URL,
-      DASHBOARD_URL: env.DASHBOARD_URL,
-      VITE_API_URL: env.API_PUBLIC_URL,
-      AGENT_DRY_RUN: process.env.AGENT_DRY_RUN || 'true',
+
+    // Credentials go to the caller's own encrypted row, NOT to the server's
+    // .env. The env file is process-global: on a shared deployment the second
+    // user's save would overwrite the first's and the worker would then run
+    // every account on whichever key landed last.
+    //
+    // Encryption happens inside Postgres via set_user_credentials, so the
+    // plaintext never outlives this request and the key never leaves the
+    // database.
+    const { error: credError } = await db.rpc('set_user_credentials', {
+      p_owner: user.id,
+      p_anthropic_key: input.anthropicApiKey,
+      p_li_client_id: input.linkedinClientId,
+      p_li_client_secret: input.linkedinClientSecret,
     });
-    return send(res, 200, { saved: true, restartRequired: true });
-  }
+    throwDb(credError);
 
-  if (req.method === 'POST' && url.pathname === '/auth/linkedin/start') {
-    assertLinkedInConfigured();
-    const state = signState({ ownerId: user.id, nonce: randomBytes(16).toString('hex'), exp: Date.now() + 10 * 60_000 });
-    return send(res, 200, { url: linkedin.oauth.authorizationUrl(state) });
-  }
+    // Process-level settings that are genuinely shared (public URL, API
+    // version, encryption key) still live in the env file. These are operator
+    // configuration, not user secrets.
+    if (!env.TOKEN_ENCRYPTION_KEY || !env.OAUTH_STATE_SECRET) {
+      await writeEnvFile(envFilePath, {
+        TOKEN_ENCRYPTION_KEY: env.TOKEN_ENCRYPTION_KEY || randomBytes(32).toString('base64'),
+        OAUTH_STATE_SECRET: env.OAUTH_STATE_SECRET || oauthStateSecret,
+        LINKEDIN_REDIRECT_URI: `${env.API_PUBLIC_URL}/auth/linkedin/callback`,
+        LINKEDIN_API_VERSION: env.LINKEDIN_API_VERSION,
+        LINKEDIN_SCOPES: env.LINKEDIN_SCOPES,
+        API_PUBLIC_URL: env.API_PUBLIC_URL,
+        DASHBOARD_URL: env.DASHBOARD_URL,
+        VITE_API_URL: env.API_PUBLIC_URL,
+      });
+    }
 
-  if (req.method === 'GET' && url.pathname === '/api/dashboard') {
-    return send(res, 200, await dashboardPayload(user.id));
-  }
-
-  if (req.method === 'POST' && url.pathname === '/api/voice-profile') {
-    const input = VoiceInput.parse(await body(req));
-    const accountId = await requireOwnedAccount(user.id, input.accountId);
-    const { data: latest, error: versionError } = await db.from('voice_profiles')
-      .select('version').eq('account_id', accountId).order('version', { ascending: false }).limit(1);
-    throwDb(versionError);
-    const version = (latest?.[0]?.version ?? 0) + 1;
-    const profile = analyseVoice(input.posts);
-    const { error: deactivateError } = await db.from('voice_profiles').update({ active: false }).eq('account_id', accountId);
-    throwDb(deactivateError);
-    const { error } = await db.from('voice_profiles').insert({
-      account_id: accountId, version, profile, source_posts: input.posts, active: true,
-    });
-    throwDb(error);
-    return send(res, 201, { version, profile });
+    return send(res, 200, { saved: true, restartRequired: false });
   }
 
   if (req.method === 'PUT' && url.pathname === '/api/pillars') {

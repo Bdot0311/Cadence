@@ -38,6 +38,7 @@ function deps(overrides: Partial<SchedulerDeps> = {}) {
       return [
         {
           id: 'a1',
+          ownerId: 'owner-1',
           urn: 'urn:li:person:abc123',
           accessToken: 'tok',
           schedule,
@@ -47,7 +48,7 @@ function deps(overrides: Partial<SchedulerDeps> = {}) {
     },
     async duePosts() { return [post('p1')]; },
     async publishedPosts() { return []; },
-    posts: { create } as never,
+    postsFor: async () => ({ create }) as never,
     async markPublished(postId, urn) { publishedRows.push({ postId, urn }); },
     async markFailed(postId, reason) { failedRows.push({ postId, reason }); },
     async reschedule(postId, to) { rescheduled.push({ postId, to }); },
@@ -217,6 +218,7 @@ describe('pacing', () => {
         return [
           {
             id: 'a1',
+            ownerId: 'owner-1',
             urn: 'urn:li:person:abc123',
             accessToken: 'tok',
             schedule: { ...schedule, dailyCap: 5 },
@@ -243,7 +245,7 @@ describe('publish failures', () => {
       .mockResolvedValueOnce({ urn: 'urn:li:share:7002' });
 
     const h = deps({
-      posts: { create } as never,
+      postsFor: async () => ({ create }) as never,
       async duePosts() { return [post('p1'), post('p2')]; },
       async publishedPosts() { return []; },
     });
@@ -260,7 +262,7 @@ describe('publish failures', () => {
       .mockRejectedValue(new LinkedInError('revoked', { status: 401, endpoint: '/posts' }));
 
     const h = deps({
-      posts: { create } as never,
+      postsFor: async () => ({ create }) as never,
       async duePosts() { return [post('p1'), post('p2'), post('p3')]; },
     });
 
@@ -278,7 +280,7 @@ describe('publish failures', () => {
   ])('treats a %s block as skipped, not failed', async (_label, error) => {
     const create = vi.fn().mockRejectedValue(error);
     const h = deps({
-      posts: { create } as never,
+      postsFor: async () => ({ create }) as never,
       async duePosts() { return [post('p1'), post('p2')]; },
     });
 
