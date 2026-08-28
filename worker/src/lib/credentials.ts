@@ -90,11 +90,17 @@ export function resolveCredentials(args: {
   const linkedinClientSecret =
     stored?.linkedinClientSecret ?? (allowEnv ? env.linkedinClientSecret ?? null : null);
 
+  // Collect every gap before throwing, so the operator sees all of them at
+  // once rather than fixing one and rediscovering the next. The explicit
+  // re-checks below are what let TypeScript narrow away the nulls; it cannot
+  // follow the narrowing through the array length test.
   const missing: string[] = [];
   if (!anthropicApiKey) missing.push('anthropic_api_key');
   if (!linkedinClientId) missing.push('linkedin_client_id');
   if (!linkedinClientSecret) missing.push('linkedin_client_secret');
-  if (missing.length > 0) throw new MissingCredentialsError(ownerId, missing);
+  if (!anthropicApiKey || !linkedinClientId || !linkedinClientSecret) {
+    throw new MissingCredentialsError(ownerId, missing);
+  }
 
   const fromStore =
     stored?.anthropicApiKey !== null &&
