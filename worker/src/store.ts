@@ -252,7 +252,10 @@ export class SupabaseRuntimeStore implements GuardStore {
    * worker process and nowhere else.
    */
   async credentialsForOwner(ownerId: string): Promise<StoredOwnerCredentials | null> {
-    const { data, error } = await this.db.rpc('get_user_credentials', { p_owner: ownerId });
+    const { data, error } = await this.db.rpc('get_user_credentials', {
+      p_owner: ownerId,
+      p_encryption_secret: this.encryptionSecret,
+    });
     throwIf(error);
     const row = Array.isArray(data) ? data[0] : null;
     if (!row) return null;

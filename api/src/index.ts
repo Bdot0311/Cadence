@@ -118,6 +118,9 @@ async function route(req: IncomingMessage, res: ServerResponse): Promise<void> {
     // database.
     const { error: credError } = await db.rpc('set_user_credentials', {
       p_owner: user.id,
+      // Passed per call rather than read from a database setting — see
+      // 0012_credential_rpc_secret.sql.
+      p_encryption_secret: env.TOKEN_ENCRYPTION_KEY,
       p_anthropic_key: input.anthropicApiKey,
       p_li_client_id: input.linkedinClientId,
       p_li_client_secret: input.linkedinClientSecret,
